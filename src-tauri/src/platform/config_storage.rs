@@ -1,13 +1,7 @@
 use rusqlite::{Connection, OptionalExtension, params};
 
 fn open_conn(app: &tauri::AppHandle) -> Result<Connection, String> {
-    use tauri::Manager;
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("无法获取数据目录: {}", e))?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败: {}", e))?;
-    let path = dir.join("mydata.db");
+    let path = crate::platform::paths::db_path(app)?;
     Connection::open(path).map_err(|e| format!("打开数据库失败: {}", e))
 }
 

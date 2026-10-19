@@ -96,17 +96,17 @@ pub fn start_listener(
         // 循环退出后重置标志
         let mut started = LISTENER_STARTED.lock().unwrap();
         *started = false;
-        println!("[Discovery] 监听线程已停止");
+        crate::log_info!("[Discovery] 监听线程已停止");
     });
 
-    println!("[Discovery] 监听线程已启动，端口 {}", DISCOVERY_PORT);
+    crate::log_info!("[Discovery] 监听线程已启动，端口 {}", DISCOVERY_PORT);
     Ok(())
 }
 
 /// 停止 UDP 监听
 pub fn stop_listener() {
     LISTENER_RUNNING.store(false, Ordering::Relaxed);
-    println!("[Discovery] 已发送停止信号");
+    crate::log_info!("[Discovery] 已发送停止信号");
 }
 
 /// 广播 discover 消息，收集局域网内打开的设备的回应

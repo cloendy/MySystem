@@ -1,14 +1,13 @@
 <script setup lang="ts">
+
+import { logger } from '../../../platform/services/logger'
 import { onMounted, onUnmounted, ref, nextTick, defineExpose } from 'vue';
 import ePub, { Book as EpubBook, Rendition } from 'epubjs';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { Book } from '../types';
-import { useReaderStore } from '../stores/reader';
 import * as api from '../api';
 
 const props = defineProps<{ book: Book }>();
-
-const store = useReaderStore();
 
 // 选中气泡
 const selectionBubble = ref<{
@@ -64,7 +63,7 @@ async function load() {
     if (!viewerEl.value) throw new Error('viewer 容器未挂载');
 
     const assetUrl = convertFileSrc(props.book.filePath);
-    console.log('[EPUB] 加载:', assetUrl);
+    logger.info('[EPUB] 加载:', assetUrl);
 
     epubBook = ePub(assetUrl);
     await withTimeout(epubBook.ready, 15000, 'book.ready');
@@ -146,7 +145,7 @@ async function load() {
                 };
             }
         } catch (err) {
-            console.warn('[EPUB] 处理选中事件失败:', err);
+            logger.warn('[EPUB] 处理选中事件失败:', err);
         }
     });
 
@@ -171,9 +170,6 @@ async function nextPage() {
 async function goToHref(href: string) {
     if (rendition) await rendition.display(href);
 }
-function toggleToc() {
-    // 由父组件控制显示
-}
 
 onMounted(async () => {
     try {
@@ -181,7 +177,7 @@ onMounted(async () => {
         await load();
         loading.value = false;
     } catch (err) {
-        console.error('[EPUB] 加载失败:', err);
+        logger.error('[EPUB] 加载失败:', err);
         errorMsg.value = err instanceof Error ? err.message : String(err);
         loading.value = false;
     }
@@ -221,11 +217,11 @@ async function renderExistingAnnotations() {
                 );
                 appliedHighlights.add(cfi);
             } catch (err) {
-                console.warn('[EPUB] 渲染单个标注失败:', err);
+                logger.warn('[EPUB] 渲染单个标注失败:', err);
             }
         }
     } catch (err) {
-        console.warn('[EPUB] 加载已有标注失败:', err);
+        logger.warn('[EPUB] 加载已有标注失败:', err);
     }
 }
 
@@ -259,9 +255,9 @@ async function saveAnnotation(color: string) {
         window.dispatchEvent(new CustomEvent('mysystem:annotation-added', { detail: ann }));
 
         selectionBubble.value.visible = false;
-        console.log('[EPUB] 标注已保存:', ann.id);
+        logger.info('[EPUB] 标注已保存:', ann.id);
     } catch (err) {
-        console.error('[EPUB] 保存标注失败:', err);
+        logger.error('[EPUB] 保存标注失败:', err);
     }
 }
 
@@ -273,7 +269,7 @@ async function goToCfi(cfi: string) {
     try {
         await rendition.display(cfi);
     } catch (err) {
-        console.warn('[EPUB] 跳转失败:', err);
+        logger.warn('[EPUB] 跳转失败:', err);
     }
 }
 
@@ -286,7 +282,7 @@ async function removeAnnotationHighlight(cfi: string) {
         rendition.annotations.remove(cfi, 'highlight');
         appliedHighlights.delete(cfi);
     } catch (err) {
-        console.warn('[EPUB] 移除高亮失败:', err);
+        logger.warn('[EPUB] 移除高亮失败:', err);
     }
 }
 

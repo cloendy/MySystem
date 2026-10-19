@@ -1,4 +1,6 @@
 <script setup lang="ts">
+
+import { logger } from './platform/services/logger'
 import { onMounted, ref } from 'vue';
 import AppShell from './platform/shell/AppShell.vue';
 import MobileShell from './platform/shell/MobileShell.vue';
@@ -17,7 +19,7 @@ const platform = ref<Platform>('windows');
 onMounted(async () => {
   platform.value = detectPlatform();
   // platform.value = 'android'; // 临时测试用
-  console.log('[App] 当前平台:', platform.value);
+  logger.info('[App] 当前平台:', platform.value);
 
   createAppRouter();
 

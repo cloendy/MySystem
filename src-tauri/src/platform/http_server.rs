@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use tauri::Manager;
 use tiny_http::{Header, Method, Request, Response, Server};
 
 pub const SYNC_HTTP_PORT: u16 = 54322;
@@ -49,7 +48,7 @@ fn handle_request(
     // 去掉 query 参数，只保留路径
     let path = url.split('?').next().unwrap_or(&url).to_string();
 
-    println!("[HTTP] {} {}", method, path);
+    crate::log_info!("[HTTP] {} {}", method, path);
 
     match (method, path.as_str()) {
         (Method::Get, "/api/info") => {
@@ -91,7 +90,7 @@ fn handle_sync_exchange(
         }
     };
 
-    println!(
+    crate::log_info!(
         "[HTTP] 收到来自 {} 的同步请求，文档数 {}，笔记数 {}",
         incoming.sender_device_name,
         incoming.documents.len(),
@@ -99,14 +98,13 @@ fn handle_sync_exchange(
     );
 
     // 打开本地数据库
-    let dir = match app_handle.path().app_data_dir() {
-        Ok(d) => d,
+    let path = match crate::platform::paths::db_path(app_handle) {
+        Ok(p) => p,
         Err(e) => {
-            let _ = request.respond(text_response(&format!("获取数据目录失败: {}", e), 500));
+            let _ = request.respond(text_response(&format!("获取数据库路径失败: {}", e), 500));
             return;
         }
     };
-    let path = dir.join("mydata.db");
     let mut conn = match rusqlite::Connection::open(&path) {
         Ok(c) => c,
         Err(e) => {
@@ -140,7 +138,7 @@ fn handle_sync_exchange(
         server_payload,
     };
 
-    println!(
+    crate::log_info!(
         "[HTTP] 同步完成: 新增 {}，合并 {}，拒绝 {}",
         accepted, merged, rejected
     );
@@ -185,15 +183,15 @@ pub fn start_http_server(
                     // 超时，继续循环
                 }
                 Err(e) => {
-                    eprintln!("[HTTP] 接收请求出错: {}", e);
+                    crate::log_info!("[HTTP] 接收请求出错: {}", e);
                     break;
                 }
             }
         }
-        println!("[HTTP] 服务端线程已退出");
+        crate::log_info!("[HTTP] 服务端线程已退出");
     });
 
-    println!("[HTTP] 服务端已启动，端口 {}", SYNC_HTTP_PORT);
+    crate::log_info!("[HTTP] 服务端已启动，端口 {}", SYNC_HTTP_PORT);
     Ok(())
 }
 
@@ -202,7 +200,7 @@ pub fn stop_http_server() {
     HTTP_RUNNING.store(false, Ordering::Relaxed);
     let mut guard = HTTP_SERVER.lock().unwrap();
     *guard = None;
-    println!("[HTTP] 已发送停止信号");
+    crate::log_info!("[HTTP] 已发送停止信号");
 }
 
 // ===== Tauri 命令 =====

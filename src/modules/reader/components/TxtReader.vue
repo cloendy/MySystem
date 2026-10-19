@@ -1,4 +1,6 @@
 <script setup lang="ts">
+
+import { logger } from '../../../platform/services/logger'
 import { onMounted, onUnmounted, ref, computed, nextTick } from 'vue';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import * as api from '../api';
@@ -106,7 +108,7 @@ function decodeText(bytes: Uint8Array): string {
         // 回退 GBK
         try {
             const text = new TextDecoder('gbk').decode(bytes);
-            console.log('[TXT] 使用 GBK 解码');
+            logger.info('[TXT] 使用 GBK 解码');
             return text;
         } catch {
             return new TextDecoder('utf-8').decode(bytes);
@@ -116,16 +118,16 @@ function decodeText(bytes: Uint8Array): string {
 
 async function load() {
     const url = convertFileSrc(props.book.filePath);
-    console.log('[TXT] 加载:', url);
+    logger.info('[TXT] 加载:', url);
 
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`读取文件失败: HTTP ${resp.status}`);
     const bytes = new Uint8Array(await resp.arrayBuffer());
-    console.log('[TXT] 读取完成，字节数:', bytes.length);
+    logger.info('[TXT] 读取完成，字节数:', bytes.length);
 
     const text = decodeText(bytes);
     chapters.value = parseChapters(text);
-    console.log('[TXT] 解析完成，共', chapters.value.length, '章');
+    logger.info('[TXT] 解析完成，共', chapters.value.length, '章');
 
     if (chapters.value.length === 0) {
         throw new Error('文件为空或无法解析章节');
@@ -196,9 +198,9 @@ async function saveProgress() {
             currentPage: page,
             readingStatus: status,
         });
-        console.log(`[TXT] 进度已保存: 第 ${page}/${totalChapters.value} 章`);
+        logger.info(`[TXT] 进度已保存: 第 ${page}/${totalChapters.value} 章`);
     } catch (err) {
-        console.warn('[TXT] 保存进度失败:', err);
+        logger.warn('[TXT] 保存进度失败:', err);
     }
 }
 
@@ -221,7 +223,7 @@ onMounted(async () => {
         loading.value = false;
         window.addEventListener('keydown', handleKeydown);
     } catch (err) {
-        console.error('[TXT] 加载失败:', err);
+        logger.error('[TXT] 加载失败:', err);
         errorMsg.value = err instanceof Error ? err.message : String(err);
         loading.value = false;
     }

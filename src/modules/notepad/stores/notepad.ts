@@ -1,9 +1,13 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
+import { logger } from '../../../platform/services/logger';
 import * as api from '../api';
 import type {
     Note, CreateNoteInput, UpdateNoteInput, Folder
 } from '../types';
+
+/** 搜索日志最小间隔，避免逐字输入刷屏 */
+const SEARCH_LOG_INTERVAL_MS = 1000;
 
 export const useNotepadStore = defineStore('notepad', () => {
     const notes = ref<Note[]>([]);
@@ -28,11 +32,15 @@ export const useNotepadStore = defineStore('notepad', () => {
 
     async function selectNote(id: string) {
         currentNote.value = await api.getNote(id);
+        if (currentNote.value) {
+            logger.info(`[Notepad] 打开笔记: ${currentNote.value.title || '(无标题)'}`);
+        }
     }
 
     async function addNote(input: CreateNoteInput) {
         const note = await api.createNote(input);
         notes.value.unshift(note);
+        logger.info(`[Notepad] 新建笔记: ${note.title || '(无标题)'} (${note.id})`);
         return note;
     }
 
@@ -45,9 +53,12 @@ export const useNotepadStore = defineStore('notepad', () => {
     }
 
     async function removeNote(id: string) {
+        const target = notes.value.find((n) => n.id === id)
+            ?? (currentNote.value?.id === id ? currentNote.value : null);
         await api.deleteNote(id);
         notes.value = notes.value.filter((n) => n.id !== id);
         if (currentNote.value?.id === id) currentNote.value = null;
+        logger.info(`[Notepad] 删除笔记: ${target?.title || id}`);
     }
 
     async function fetchFolders() {
@@ -57,28 +68,35 @@ export const useNotepadStore = defineStore('notepad', () => {
     async function addFolder(name: string, parentId: string | null = null) {
         const folder = await api.createFolder({ name, parentId });
         folders.value.push(folder);
+        logger.info(`[Notepad] 新建文件夹: ${name}`);
         return folder;
     }
 
     async function renameFolder(id: string, name: string) {
+        const oldName = folders.value.find((f) => f.id === id)?.name;
         const updated = await api.updateFolder({ id, name });
         const idx = folders.value.findIndex((f) => f.id === id);
         if (idx >= 0) folders.value[idx] = updated;
+        logger.info(`[Notepad] 重命名文件夹: ${oldName || id} -> ${name}`);
     }
 
     async function removeFolder(id: string) {
+        const name = folders.value.find((f) => f.id === id)?.name;
         await api.deleteFolder(id);
         folders.value = folders.value.filter((f) => f.id !== id);
         if (currentFolderId.value === id) {
             currentFolderId.value = null;
             await fetchNotes(null);
         }
+        logger.info(`[Notepad] 删除文件夹: ${name || id}`);
     }
 
     async function selectFolder(id: string | null) {
         currentFolderId.value = id;
         selectedTag.value = null;   // 切换文件夹时清空标签筛选
         await fetchNotes(id);
+        const name = id ? folders.value.find((f) => f.id === id)?.name : null;
+        logger.info(`[Notepad] 切换文件夹: ${name || '全部笔记'}`);
     }
 
     async function moveNoteToFolder(noteId: string, folderId: string | null) {
@@ -99,6 +117,7 @@ export const useNotepadStore = defineStore('notepad', () => {
 
     function selectTag(tag: string | null) {
         selectedTag.value = tag;
+        logger.info(`[Notepad] 按标签筛选: ${tag || '清除筛选'}`);
     }
 
     async function addTagToNote(noteId: string, tag: string) {
@@ -106,6 +125,7 @@ export const useNotepadStore = defineStore('notepad', () => {
         if (!note || note.tags.includes(tag)) return;
         const newTags = [...note.tags, tag];
         await editNote({ id: noteId, tags: newTags });
+        logger.info(`[Notepad] 添加标签: ${tag} -> ${note.title || noteId}`);
     }
 
     async function removeTagFromNote(noteId: string, tag: string) {
@@ -113,7 +133,10 @@ export const useNotepadStore = defineStore('notepad', () => {
         if (!note) return;
         const newTags = note.tags.filter((t) => t !== tag);
         await editNote({ id: noteId, tags: newTags });
+        logger.info(`[Notepad] 移除标签: ${tag} <- ${note.title || noteId}`);
     }
+
+    let lastSearchLogAt = 0;
 
     async function search(keyword: string) {
         searchKeyword.value = keyword;
@@ -122,6 +145,11 @@ export const useNotepadStore = defineStore('notepad', () => {
             return;
         }
         searchResults.value = await api.searchNotes(keyword.trim());
+        const now = Date.now();
+        if (now - lastSearchLogAt >= SEARCH_LOG_INTERVAL_MS) {
+            lastSearchLogAt = now;
+            logger.info(`[Notepad] 搜索 "${keyword.trim()}"：${searchResults.value.length} 条结果`);
+        }
     }
 
     function clearSearch() {

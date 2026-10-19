@@ -1,4 +1,6 @@
 <script setup lang="ts">
+
+import { logger } from '../../../platform/services/logger'
 import { onMounted, onUnmounted, computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useReaderStore } from '../stores/reader';
@@ -93,7 +95,7 @@ async function detectTotalPages(
             const n = doc.numPages;
             // pdfjs-dist 4.x 用 cleanup 代替 destroy
             await doc.cleanup();
-            console.log('[Import] PDF 页数:', n);
+            logger.info('[Import] PDF 页数:', n);
             return n;
         }
 
@@ -107,7 +109,7 @@ async function detectTotalPages(
             ]);
             const n = (book.spine as any)?.length ?? 0;
             book.destroy();
-            console.log('[Import] EPUB 章节数:', n);
+            logger.info('[Import] EPUB 章节数:', n);
             return n;
         }
 
@@ -128,13 +130,13 @@ async function detectTotalPages(
                 }
             }
             const result = count > 0 ? count : 1;
-            console.log('[Import] TXT 章节数:', result);
+            logger.info('[Import] TXT 章节数:', result);
             return result;
         }
 
         return 0;
     } catch (err) {
-        console.warn('[Import] 解析页数失败:', err);
+        logger.warn('[Import] 解析页数失败:', err);
         return 0;
     }
 }
@@ -181,25 +183,23 @@ async function handleImport() {
 
         importing.value = true;
 
-        console.log('[Import] 复制文件:', selected);
+        logger.info('[Import] 复制文件:', selected);
         const imported = await api.importBookFile(selected);
-        console.log('[Import] 文件已复制:', imported);
+        logger.info('[Import] 文件已复制:', imported);
 
         // 自动识别页数/章节数
         const totalPages = await detectTotalPages(imported.filePath, imported.fileFormat);
-        console.log('[Import] 识别结果 totalPages =', totalPages);
+        logger.info('[Import] 识别结果 totalPages =', totalPages);
 
-        const book = await store.addBook({
+        await store.addBook({
             title: imported.title,
             author: '',
             filePath: imported.filePath,
             fileFormat: imported.fileFormat as 'epub' | 'pdf' | 'mobi' | 'txt',
             totalPages,
         });
-
-        console.log('[Import] 书籍记录已创建:', book);
     } catch (err) {
-        console.error('[Import] 导入失败:', err);
+        logger.error('[Import] 导入失败:', err);
         alert(`导入失败: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
         importing.value = false;

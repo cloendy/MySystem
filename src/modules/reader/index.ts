@@ -1,3 +1,4 @@
+import { logger } from '../../platform/services/logger'
 import type { ModuleInterface } from '../../platform/services/module-types';
 
 const readerModule: ModuleInterface = {
@@ -6,7 +7,7 @@ const readerModule: ModuleInterface = {
     version: '1.0.0',
 
     async onLoad(context) {
-        console.log('[Reader] 模块已加载，平台:', context.platform);
+        logger.info('[Reader] 模块已加载，平台:', context.platform);
     },
 
     getRoutes() {

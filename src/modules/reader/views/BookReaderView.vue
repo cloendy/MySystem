@@ -1,4 +1,6 @@
 <script setup lang="ts">
+
+import { logger } from '../../../platform/services/logger'
 import { onMounted, onUnmounted, ref, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useReaderStore } from '../stores/reader';
@@ -97,7 +99,7 @@ onMounted(async () => {
         loading.value = false;
         window.addEventListener('keydown', handleKeydown);
     } catch (err) {
-        console.error('[Reader] 出错:', err);
+        logger.error('[Reader] 出错:', err);
         errorMsg.value = err instanceof Error ? err.message : String(err);
         loading.value = false;
     }
@@ -108,9 +110,9 @@ onUnmounted(async () => {
     // 返回书架时刷新书籍列表，让进度和状态同步显示
     try {
         await store.fetchBooks();
-        console.log('[Reader] 书架数据已刷新');
+        logger.info('[Reader] 书架数据已刷新');
     } catch (err) {
-        console.warn('[Reader] 刷新书架失败:', err);
+        logger.warn('[Reader] 刷新书架失败:', err);
     }
 });
 </script>

@@ -195,12 +195,7 @@ pub fn get_sync_payload(
     device_id: String,
     device_name: String,
 ) -> Result<SyncPayload, String> {
-    use tauri::Manager;
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("无法获取数据目录: {}", e))?;
-    let path = dir.join("mydata.db");
+    let path = crate::platform::paths::db_path(&app)?;
     let conn = Connection::open(path).map_err(|e| format!("打开数据库失败: {}", e))?;
     read_local_payload(&conn, &device_id, &device_name)
 }
@@ -210,12 +205,7 @@ pub fn apply_local_payload(
     app: tauri::AppHandle,
     payload: SyncPayload,
 ) -> Result<(usize, usize, usize), String> {
-    use tauri::Manager;
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("无法获取数据目录: {}", e))?;
-    let path = dir.join("mydata.db");
+    let path = crate::platform::paths::db_path(&app)?;
     let mut conn = Connection::open(path).map_err(|e| format!("打开数据库失败: {}", e))?;
     merge_payload(&mut conn, &payload)
 }

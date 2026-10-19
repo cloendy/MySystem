@@ -1,3 +1,4 @@
+import { logger } from './logger'
 import type { EventBus } from './module-types';
 
 export function createEventBus(): EventBus {
@@ -18,7 +19,7 @@ export function createEventBus(): EventBus {
                 try {
                     h(payload);
                 } catch (err) {
-                    console.error(`[EventBus] handler error for ${event}:`, err);
+                    logger.error(`[EventBus] handler error for ${event}:`, err);
                 }
             });
         },

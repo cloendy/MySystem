@@ -75,13 +75,7 @@ pub struct CreateAnnotationInput {
 }
 
 fn open_conn(app: &tauri::AppHandle) -> Result<Connection, String> {
-    use tauri::Manager;
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("无法获取数据目录: {}", e))?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败: {}", e))?;
-    let path = dir.join("mydata.db");
+    let path = crate::platform::paths::db_path(app)?;
     Connection::open(path).map_err(|e| format!("打开数据库失败: {}", e))
 }
 
@@ -406,14 +400,12 @@ pub struct ImportedBookResult {
     pub title: String,
 }
 
-/// 复制外部文件到应用数据目录下的 books 子目录，返回新路径
+/// 复制外部文件到统一数据目录下的 books 子目录，返回新路径
 #[tauri::command]
 pub fn import_book_file(
     app: tauri::AppHandle,
     source_path: String,
 ) -> Result<ImportedBookResult, String> {
-    use tauri::Manager;
-
     let src = Path::new(&source_path);
     if !src.exists() {
         return Err(format!("源文件不存在: {}", source_path));
@@ -441,7 +433,7 @@ pub fn import_book_file(
         .unwrap_or("未命名")
         .to_string();
 
-    // 应用数据目录下的 books 子目录
+    // 统一数据目录下的 books 子目录
     let books_dir = get_books_dir(&app)?;
     std::fs::create_dir_all(&books_dir).map_err(|e| format!("创建目录失败: {}", e))?;
 
@@ -451,7 +443,7 @@ pub fn import_book_file(
 
     std::fs::copy(src, &dst).map_err(|e| format!("复制文件失败: {}", e))?;
 
-    println!("[Import] 已导入 {} -> {}", source_path, dst.display());
+    crate::log_info!("[Import] 已导入 {} -> {}", source_path, dst.display());
 
     Ok(ImportedBookResult {
         file_path: dst.to_string_lossy().to_string(),
@@ -460,46 +452,31 @@ pub fn import_book_file(
     })
 }
 
-/// 删除已导入的书籍文件
+/// 删除已导入的书籍文件（仅允许删除 data/books 下的文件）
 #[tauri::command]
-pub fn delete_book_file(file_path: String) -> Result<(), String> {
+pub fn delete_book_file(app: tauri::AppHandle, file_path: String) -> Result<(), String> {
     let path = Path::new(&file_path);
-    // 只允许删除应用数据目录下的文件
-    let data_dir_hint = "com.mysystem.app";
-    if !file_path.contains(data_dir_hint) {
-        return Err("拒绝删除非应用数据目录的文件".to_string());
+    if !path.exists() {
+        return Ok(());
     }
-    if path.exists() {
-        std::fs::remove_file(path).map_err(|e| format!("删除文件失败: {}", e))?;
-        println!("[Import] 已删除文件: {}", file_path);
+
+    let books_dir = crate::platform::paths::books_dir(&app)?;
+    let canonical_file = path
+        .canonicalize()
+        .map_err(|e| format!("无法解析文件路径: {}", e))?;
+    let canonical_books = books_dir
+        .canonicalize()
+        .map_err(|e| format!("无法解析 books 目录: {}", e))?;
+
+    if !canonical_file.starts_with(&canonical_books) {
+        return Err("拒绝删除 data/books 目录之外的文件".to_string());
     }
+
+    std::fs::remove_file(path).map_err(|e| format!("删除文件失败: {}", e))?;
+    crate::log_info!("[Import] 已删除文件: {}", file_path);
     Ok(())
 }
 
 fn get_books_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    // 优先安装目录
-    if let Ok(install_dir) = get_install_dir() {
-        let books_dir = install_dir.join("books");
-        if std::fs::create_dir_all(&books_dir).is_ok() {
-            return Ok(books_dir);
-        }
-    }
-    // 回退到应用数据目录
-    use tauri::Manager;
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("无法获取数据目录: {}", e))?;
-    let books_dir = data_dir.join("books");
-    std::fs::create_dir_all(&books_dir).map_err(|e| format!("创建 books 目录失败: {}", e))?;
-    Ok(books_dir)
-}
-
-pub fn get_install_dir() -> Result<PathBuf, String> {
-    let exe_path = std::env::current_exe().map_err(|e| format!("无法获取可执行文件路径: {}", e))?;
-    let install_dir = exe_path
-        .parent()
-        .ok_or_else(|| "无法获取安装目录".to_string())?
-        .to_path_buf();
-    Ok(install_dir)
+    crate::platform::paths::books_dir(app)
 }

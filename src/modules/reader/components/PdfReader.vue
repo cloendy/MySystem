@@ -1,4 +1,6 @@
 <script setup lang="ts">
+
+import { logger } from '../../../platform/services/logger'
 import { onMounted, onUnmounted, ref, nextTick, defineExpose } from 'vue';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -69,17 +71,17 @@ async function saveProgress() {
             currentPage: currentPage.value,
             readingStatus: newStatus,
         });
-        console.log(
+        logger.info(
             `[PDF] 进度已保存: ${currentPage.value}/${pageCount.value} (${newStatus})`,
         );
     } catch (err) {
-        console.warn('[PDF] 保存进度失败:', err);
+        logger.warn('[PDF] 保存进度失败:', err);
     }
 }
 
 async function load() {
     const url = convertFileSrc(props.book.filePath);
-    console.log('[PDF] 加载:', url);
+    logger.info('[PDF] 加载:', url);
 
     const loadingTask = pdfjsLib.getDocument({
         url,
@@ -89,13 +91,13 @@ async function load() {
 
     pdfDoc = await withTimeout(loadingTask.promise, 20000, 'PDF 解析');
     pageCount.value = pdfDoc.numPages;
-    console.log('[PDF] 加载完成，共', pageCount.value, '页');
+    logger.info('[PDF] 加载完成，共', pageCount.value, '页');
 
     // 恢复上次阅读页码
     const savedPage = props.book.currentPage;
     if (savedPage && savedPage > 0 && savedPage <= pageCount.value) {
         currentPage.value = savedPage;
-        console.log('[PDF] 恢复上次页码:', savedPage);
+        logger.info('[PDF] 恢复上次页码:', savedPage);
     }
 
     await renderCurrentPage();
@@ -202,7 +204,7 @@ onMounted(async () => {
         loading.value = false;
         window.addEventListener('keydown', handleKeydown);
     } catch (err) {
-        console.error('[PDF] 加载失败:', err);
+        logger.error('[PDF] 加载失败:', err);
         errorMsg.value = err instanceof Error ? err.message : String(err);
         loading.value = false;
     }

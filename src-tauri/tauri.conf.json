@@ -32,13 +32,6 @@
       }
     }
   },
-  "plugins": {
-    "sql": {
-      "preload": [
-        "sqlite:mydata.db"
-      ]
-    }
-  },
   "bundle": {
     "active": true,
     "targets": [

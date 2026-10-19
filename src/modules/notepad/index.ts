@@ -1,3 +1,4 @@
+import { logger } from '../../platform/services/logger'
 import type { ModuleInterface } from '../../platform/services/module-types';
 
 const notepadModule: ModuleInterface = {
@@ -6,7 +7,7 @@ const notepadModule: ModuleInterface = {
     version: '1.0.0',
 
     async onLoad(context) {
-        console.log('[Notepad] 模块已加载，平台:', context.platform);
+        logger.info('[Notepad] 模块已加载，平台:', context.platform);
         // 后续可以在这里预加载数据
     },
 

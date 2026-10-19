@@ -1,3 +1,4 @@
+import { logger } from './logger'
 import type {
     ModuleInterface,
     ModuleContext,
@@ -56,7 +57,7 @@ export async function loadEnabledModules(
 
     for (const reg of regs) {
         if (!reg.enabled[platform]) {
-            console.log(`[ModuleLoader] 跳过模块 ${reg.id}（平台 ${platform} 未启用）`);
+            logger.info(`[ModuleLoader] 跳过模块 ${reg.id}（平台 ${platform} 未启用）`);
             continue;
         }
 
@@ -66,7 +67,7 @@ export async function loadEnabledModules(
         );
 
         if (!entryKey) {
-            console.warn(`[ModuleLoader] 模块 ${reg.id} 的入口文件未找到`);
+            logger.warn(`[ModuleLoader] 模块 ${reg.id} 的入口文件未找到`);
             continue;
         }
 
@@ -75,16 +76,16 @@ export async function loadEnabledModules(
             const instance = mod.default;
 
             if (!instance || typeof instance.onLoad !== 'function') {
-                console.warn(`[ModuleLoader] 模块 ${reg.id} 未正确实现 ModuleInterface`);
+                logger.warn(`[ModuleLoader] 模块 ${reg.id} 未正确实现 ModuleInterface`);
                 continue;
             }
 
             await instance.onLoad(context);
             loadedModules.set(reg.id, instance);
             loaded.push(instance);
-            console.log(`[ModuleLoader] 已加载模块: ${reg.id} v${reg.version}`);
+            logger.info(`[ModuleLoader] 已加载模块: ${reg.id} v${reg.version}`);
         } catch (err) {
-            console.error(`[ModuleLoader] 模块 ${reg.id} 加载失败:`, err);
+            logger.error(`[ModuleLoader] 模块 ${reg.id} 加载失败:`, err);
         }
     }
 
@@ -109,12 +110,14 @@ export function getModule(id: string): ModuleInterface | undefined {
  * 卸载所有模块
  */
 export async function unloadAllModules(): Promise<void> {
+    if (loadedModules.size === 0) return;
     for (const mod of loadedModules.values()) {
         try {
             await mod.onUnload?.();
         } catch (err) {
-            console.error(`[ModuleLoader] 模块 ${mod.id} 卸载失败:`, err);
+            logger.error(`[ModuleLoader] 模块 ${mod.id} 卸载失败:`, err);
         }
     }
+    logger.info(`[ModuleLoader] 已卸载模块: ${Array.from(loadedModules.keys()).join(', ')}`);
     loadedModules.clear();
 }

@@ -4,54 +4,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 pub fn db_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    use tauri::Manager;
-
-    // ===== 开发模式：走用户数据目录 =====
-    #[cfg(debug_assertions)]
-    {
-        let dir = app_handle
-            .path()
-            .app_data_dir()
-            .map_err(|e| format!("无法获取数据目录: {}", e))?;
-        std::fs::create_dir_all(&dir).ok();
-        println!("[Storage][DEV] 数据目录: {}", dir.display());
-        return Ok(dir.join("mydata.db"));
-    }
-
-    // ===== 生产模式：走 exe 所在目录 =====
-    #[cfg(not(debug_assertions))]
-    {
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(install_dir) = exe.parent() {
-                // 可写性检测
-                let test = install_dir.join(".write_test");
-                if std::fs::write(&test, b"test").is_ok() {
-                    std::fs::remove_file(&test).ok();
-                    println!("[Storage][PROD] 数据目录: {}", install_dir.display());
-                    return Ok(install_dir.join("mydata.db"));
-                } else {
-                    println!("[Storage][PROD] 安装目录不可写，回退");
-                }
-            }
-        }
-
-        // 回退：Program Files 不可写时使用用户目录
-        let dir = app_handle
-            .path()
-            .app_data_dir()
-            .map_err(|e| format!("无法获取数据目录: {}", e))?;
-        std::fs::create_dir_all(&dir).ok();
-        Ok(dir.join("mydata.db"))
-    }
-}
-
-pub fn get_install_dir() -> Result<PathBuf, String> {
-    let exe_path = std::env::current_exe().map_err(|e| format!("无法获取可执行文件路径: {}", e))?;
-    let install_dir = exe_path
-        .parent()
-        .ok_or_else(|| "无法获取安装目录".to_string())?
-        .to_path_buf();
-    Ok(install_dir)
+    crate::platform::paths::db_path(app_handle)
 }
 
 fn open_conn(app_handle: &tauri::AppHandle) -> Result<Connection, String> {

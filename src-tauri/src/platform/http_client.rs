@@ -34,7 +34,7 @@ pub async fn check_remote_device(ip_address: String) -> Result<RemoteDeviceInfo,
         .await
         .map_err(|e| format!("解析响应失败: {}", e))?;
 
-    println!(
+    crate::log_info!(
         "[HTTP Client] 握手成功: {} ({}) @ {}",
         info.device_name, info.platform, ip_address
     );
@@ -72,7 +72,7 @@ pub async fn exchange_sync_data(
         .await
         .map_err(|e| format!("解析响应失败: {}", e))?;
 
-    println!(
+    crate::log_info!(
         "[HTTP Client] 同步完成: 新增 {}，合并 {}，拒绝 {}",
         response.accepted, response.merged, response.rejected
     );

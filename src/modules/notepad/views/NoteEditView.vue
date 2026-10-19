@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue';
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { EditorView, basicSetup } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { marked } from 'marked';
 import { useNotepadStore } from '../stores/notepad';
+import { logger } from '../../../platform/services/logger';
 import TagEditor from '../components/TagEditor.vue';
+
+/** 自动保存日志最小间隔，避免每次输入停顿都写一条 */
+const SAVE_LOG_INTERVAL_MS = 5000;
+
+let lastSaveLogAt = 0;
 
 const route = useRoute();
 const router = useRouter();
@@ -49,6 +55,11 @@ onMounted(async () => {
     }
 });
 
+onUnmounted(() => {
+    editorView?.destroy();
+    editorView = null;
+});
+
 // 标题防抖保存
 let saveTimer: number | null = null;
 watch([title, content], () => {
@@ -65,6 +76,11 @@ async function save() {
             title: title.value,
             content: content.value,
         });
+        const now = Date.now();
+        if (now - lastSaveLogAt >= SAVE_LOG_INTERVAL_MS) {
+            lastSaveLogAt = now;
+            logger.info(`[Notepad] 保存笔记: ${title.value || '(无标题)'}`);
+        }
     } finally {
         saving.value = false;
     }

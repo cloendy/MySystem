@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# 应用数据目录（数据库、书籍等），不纳入版本管理
+/data/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -22,5 +25,4 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-CLAUDE.md
 Command.md

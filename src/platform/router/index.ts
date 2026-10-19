@@ -1,3 +1,4 @@
+import { logger } from '../services/logger'
 import { createRouter, createWebHashHistory, type Router } from 'vue-router';
 import type { ModuleInterface } from '../services/module-types';
 
@@ -23,6 +24,13 @@ export function createAppRouter(): Router {
                 component: () => import('../shell/SettingsView.vue'),
             },
         ],
+    });
+
+    // 记录页面/模块切换，便于还原用户操作路径
+    router.afterEach((to, from) => {
+        if (to.fullPath === from.fullPath) return;
+        const fromLabel = from.matched.length === 0 ? '(启动)' : from.fullPath;
+        logger.info(`[Router] 页面切换: ${fromLabel} -> ${to.fullPath}`);
     });
 
     return router;
@@ -55,7 +63,7 @@ export function registerModuleRoutes(modules: ModuleInterface[]): void {
                 component: route.component,
                 meta: { ...route.meta, moduleId: mod.id, moduleName: mod.name },
             });
-            console.log(`[Router] 注册路由: ${fullPath} (${mod.id})`);
+            logger.info(`[Router] 注册路由: ${fullPath} (${mod.id})`);
         }
     }
 }
