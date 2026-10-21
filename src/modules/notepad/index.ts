@@ -5,6 +5,9 @@ const notepadModule: ModuleInterface = {
     id: 'notepad',
     name: '记事本',
     version: '1.0.0',
+    icon: '📝',
+    order: 10,
+    enabled: { windows: true, android: true },
 
     async onLoad(context) {
         logger.info('[Notepad] 模块已加载，平台:', context.platform);

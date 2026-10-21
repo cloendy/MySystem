@@ -48,7 +48,7 @@ function isSettingsActive(): boolean {
         <nav class="tabbar">
             <button v-for="m in modules" :key="m.id" class="tab-item" :class="{ active: isActive(m.id) }"
                 @click="goToModule(m.id)">
-                <span class="tab-icon">{{ m.id === 'notepad' ? '📝' : m.id === 'reader' ? '📖' : '📦' }}</span>
+                <span class="tab-icon">{{ m.icon ?? '📦' }}</span>
                 <span class="tab-label">{{ m.name }}</span>
             </button>
 

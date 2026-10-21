@@ -4,19 +4,14 @@ import type {
     CreateDocumentInput,
     UpdateDocumentInput,
 } from './types';
+import { getDeviceId } from './device';
 
 /**
- * 创建设备唯一标识（首次调用时生成并缓存到 localStorage）
+ * 文档基础 CRUD 的 invoke 封装。
+ *
+ * 注意：各业务模块目前通过自己的 `api.ts` 直接 invoke Rust 命令，
+ * 本文件暂未被业务代码使用；设备标识已拆分到 `device.ts`。
  */
-export function getDeviceId(): string {
-    const KEY = 'mysystem_device_id';
-    let id = localStorage.getItem(KEY);
-    if (!id) {
-        id = crypto.randomUUID();
-        localStorage.setItem(KEY, id);
-    }
-    return id;
-}
 
 /**
  * 创建文档

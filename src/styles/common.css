@@ -254,3 +254,61 @@
 .switch.on .switch-knob {
     left: 25px;
 }
+
+/* -------------------- 设置页 -------------------- */
+.settings-section {
+    margin-bottom: 28px;
+}
+
+.settings-section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #666;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.setting-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    gap: 16px;
+}
+
+.setting-info {
+    flex: 1;
+}
+
+.setting-label {
+    font-size: 15px;
+    color: #333;
+    font-weight: 500;
+}
+
+.setting-desc {
+    font-size: 13px;
+    color: #888;
+    margin-top: 2px;
+    word-break: break-all;
+}
+
+.setting-desc.mono {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 12px;
+}
+
+.btn-secondary {
+    padding: 6px 14px;
+    background: white;
+    border: 1px solid #d0d0d0;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.btn-secondary:hover {
+    background: #f5f5f5;
+}

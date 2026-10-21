@@ -29,30 +29,39 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
 ### 平台/模块（platform/modules）分层
 
 - `src/platform/` — 平台外壳与基础服务，模块代码**不应反向依赖具体业务**：
-  - `shell/` — `AppShell.vue`（Windows 端：顶栏 + 侧边导航 + 内容区）、`MobileShell.vue`（Android 端：顶栏 + 底部 Tab）、`HomeView.vue`、`SettingsView.vue`（同步开关、设备名、扫描局域网设备、连接/同步、同步日志、系统日志查看面板）
+  - `shell/` — `AppShell.vue`（Windows 端：顶栏 + 侧边导航 + 内容区）、`MobileShell.vue`（Android 端：顶栏 + 底部 Tab）、`HomeView.vue`、`SettingsView.vue`（设置页骨架；同步开关/设备扫描/连接同步/日志查看拆到 `settings/components/`，共享状态在 `settings/useSyncSettings.ts`）
   - `services/logger.ts` — 平台统一日志入口：`logger.info/warn/error/debug` 写入 Rust 日志服务，另提供 `listLogFiles`/`readLogFile`/`getLogDir` 供设置页查看日志
-  - `services/module-loader.ts` — 模块加载核心：读取 `public/modules.json` 获取模块注册表，用 `import.meta.glob('../../modules/*/index.ts')` 动态发现模块入口，按平台（`windows` / `android`）过滤 `enabled` 标志后加载
-  - `services/module-types.ts` — 核心契约 `ModuleInterface`（`id`/`onLoad`/`getRoutes`/`onSearch` 等）和 `ModuleContext`（目前只注入 `platform` 与 `events`）
+  - `services/module-loader.ts` — 模块加载核心：用 `import.meta.glob('../../modules/*/index.ts')` 自动发现 `src/modules/` 下的模块入口，从模块实例读取 `id`/`name`/`version`/`icon`/`order`/`enabled` 后加载（没有注册表文件）
+  - `services/module-types.ts` — 核心契约 `ModuleInterface`（`id`/`name`/`version`/`onLoad`/`getRoutes`/`onSearch`，以及可选的 `icon`/`order`/`enabled`）和 `ModuleContext`（目前只注入 `platform` 与 `events`）
   - `services/event-bus.ts` — 简易事件总线，作为 `ModuleContext.events`
   - `router/index.ts` — 全局单例 vue-router（hash 模式）；`registerModuleRoutes()` 把模块路由统一加上 `/{moduleId}` 前缀注册，路由名加 `moduleId:` 前缀
-  - `services/storage.ts` — 文档基础 CRUD 的 invoke 封装；`getDeviceId()` 用 localStorage 键 `mysystem_device_id` 持久化设备 ID（UUID v4），各模块 API 都从这里取设备 ID
+  - `services/device.ts` — `getDeviceId()` 用 localStorage 键 `mysystem_device_id` 持久化设备 ID（UUID v4），各模块 API 与设置页从这里取设备 ID
+  - `services/storage.ts` — 文档基础 CRUD 的 invoke 封装；目前未被业务代码使用（模块都走自己的 `api.ts`），保留待用
   - `services/config.ts` — 配置读写 + 设备发现 + 同步 HTTP 客户端的前端 invoke 封装（`getConfig`/`setConfig`、`startDiscoveryListener`/`scanDevices`、`startSyncServer`、`checkRemoteDevice`/`exchangeSyncData`/`getSyncPayload`/`applyLocalPayload`）
   - `services/types.ts` — 与 Rust 模型对应的前端类型（camelCase）
-- `src/modules/<id>/` — 功能模块（现有 `notepad`、`reader`），每个模块必须：
-  1. 在 `public/modules.json` 中注册（含 `enabled: { windows, android }` 开关）
-  2. 提供 `index.ts` 默认导出实现 `ModuleInterface`
-  3. 视图放在模块自己的 `views/` 下
+- `src/modules/<id>/` — 功能模块（现有 `notepad`、`reader`），模块自包含：
+  1. 提供 `index.ts` 默认导出实现 `ModuleInterface`，在实例上声明元数据（`id` 必填；`icon`/`order`/`enabled` 可选，`enabled` 未声明的平台默认启用）
+  2. 视图放在模块自己的 `views/` 下
+  3. 不需要任何注册文件；放进 `src/modules/` 即被自动发现
 
   模块内部约定结构：`index.ts`（模块契约与路由）、`api.ts`（invoke 封装）、`types.ts`（类型）、`stores/`（Pinia store）、`views/`、`components/`。模块通过自己的 `api.ts` 直接 invoke Rust 命令，**不经过** `platform/services/storage.ts` 的业务封装。
 
-**新增功能模块的完整流程**：创建 `src/modules/<id>/index.ts` → 在 `public/modules.json` 注册 → 路由会自动挂到 `/<id>/...`；如需持久化，在 `platform/database_init.rs` 补充建表并在 Rust 端新增命令。
+**新增功能模块的完整流程**：在 `src/modules/<id>/` 下创建模块文件夹（入口 `index.ts`）→ 重启 `pnpm dev`（Vite 的 glob 在启动时展开）→ 路由自动挂到 `/<id>/...`，导航自动出现；如需持久化，在 `platform/database_init.rs` 补充建表，存储实现放进 `src-tauri/src/modules/<id>/`，并在 `commands.rs` 注册命令。
 
 ### Rust 后端（src-tauri/src）
 
-- **`main.rs` 是真正的入口**：创建 `tauri::Builder`、注册 `tauri_plugin_fs` / `tauri_plugin_dialog` 插件，并在 `generate_handler![]` 中注册**全部** Tauri 命令。新增命令必须同时在这里注册，否则前端 invoke 会报 “command not found”。
-- `lib.rs` 是模板遗留的 `run()`（仅 `greet`），目前**没有被 `main.rs` 调用**。不要在 `lib.rs` 里找命令注册；若将来启用 Android 的 `mobile_entry_point`，需要把 `main.rs` 的插件与命令注册迁移过去。
+- **`lib.rs` 是真正的入口**：`run()` 创建 `tauri::Builder`、注册 `tauri_plugin_fs` / `tauri_plugin_dialog` 插件、执行启动初始化（日志、建表、asset 目录授权），并挂载 `commands::invoke_handler()`。`main.rs` 只保留 `windows_subsystem` 属性并调用 `mysystem_lib::run()`；`#[cfg_attr(mobile, tauri::mobile_entry_point)]` 也在 `lib.rs` 上，Android 入口复用同一份配置。
+- **命令注册集中在 `commands.rs` 的 `invoke_handler()`**：这是唯一的应用组装层，同时引用平台命令与各业务模块命令。新增命令必须在这里追加，否则前端 invoke 会报 “command not found”。
 - `models/document.rs` — `BaseDocument`、`CreateDocumentInput`、`UpdateDocumentInput`，统一 `#[serde(rename_all = "camelCase")]`
-- `platform/` — 按功能拆分的后端服务，均直接使用 `rusqlite` 打开 SQLite 文件：
+- `modules/` — 业务模块的 Rust 侧实现，目录 id 与前端 `src/modules/` 对齐（模块只依赖 `platform/`，不反向被平台依赖）：
+
+  | 文件 | 职责 |
+  |---|---|
+  | `notepad/mod.rs` | `create_note`/`get_note`/`list_notes`/`update_note`/`delete_note`/`search_notes`（documents JOIN notes） |
+  | `notepad/folders.rs` | 文件夹 CRUD；删除时把笔记移到未分类、子文件夹提升到根级 |
+  | `reader/mod.rs` | 书籍与标注 CRUD、`read_book_file`、`import_book_file`、`delete_book_file` |
+
+- `platform/` — 平台基础服务（不包含业务逻辑），均直接使用 `rusqlite` 打开 SQLite 文件：
 
   | 文件 | 职责 |
   |---|---|
@@ -60,9 +69,6 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
   | `database_init.rs` | 启动时在统一数据库中创建全部业务表 |
   | `logger.rs` | 平台日志服务：写 `<data>/log/mysystem-YYYY-MM-DD.log`，提供 `log_*!` 宏与日志查看命令 |
   | `storage.rs` | `documents` 基础 CRUD（软删除 + 写 `sync_operations`） |
-  | `notepad_storage.rs` | `create_note`/`get_note`/`list_notes`/`update_note`/`delete_note`/`search_notes`（documents JOIN notes） |
-  | `folder_storage.rs` | 文件夹 CRUD；删除时把笔记移到未分类、子文件夹提升到根级 |
-  | `reader_storage.rs` | 书籍与标注 CRUD、`read_book_file`、`import_book_file`、`delete_book_file` |
   | `config_storage.rs` | `app_config` 键值配置的 get/set/delete |
   | `discovery.rs` | UDP 局域网设备发现（端口 54321，magic `MYSYSTEM_V1`，`discover`/`announce`） |
   | `http_server.rs` | 基于 `tiny_http` 的同步服务端（端口 54322）：`GET /api/info`、`POST /api/sync/exchange` |
@@ -73,7 +79,7 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
 
 ### 数据层：统一 data 目录
 
-- 建表职责在 Rust `platform/database_init.rs`（`main.rs` 的 `setup` 中执行全部 `CREATE TABLE IF NOT EXISTS`）。
+- 建表职责在 Rust `platform/database_init.rs`（`lib.rs` 的 `setup` 中执行全部 `CREATE TABLE IF NOT EXISTS`）。
 - 业务数据读写走 Rust `rusqlite`；前端不直接执行 SQL，也不再使用 `@tauri-apps/plugin-sql` 加载数据库（该插件会把相对路径固定拼到 AppData，已移除注册以避免误写）。
 - **所有数据统一放在 `<应用根目录>/data/` 下**，路径解析集中在 `platform/paths.rs`：
   - `data_dir()`：开发模式（`tauri dev`）取 `CARGO_MANIFEST_DIR/../data`（即项目根 `data`）；发布模式取 **exe 所在目录/data**；目录不可写或 Android 回退到 `app_data_dir()/data`；可用环境变量 `MYSYSTEM_DATA_DIR` 覆盖。
@@ -89,7 +95,7 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
 - **Rust 端**：`platform/logger.rs` 是唯一日志出口，初始化后写入 `<data>/log/mysystem-YYYY-MM-DD.log`（按天分文件），同时输出到终端。业务代码统一使用 `crate::log_info!` / `log_warn!` / `log_error!` / `log_debug!`，不要再使用 `println!`/`eprintln!`。
 - **前端与模块**：统一使用 `src/platform/services/logger.ts` 的 `logger.info/warn/error/debug`（底层 invoke `write_log`），模块可以直接引用，不需要经过 `ModuleContext`。业务代码不要直接调用 `console.*`。
 - **自动日志**：`platform/services/ui-logging.ts` 在 `main.ts` 中安装，通过捕获阶段点击委托自动记录按钮/链接点击（`[UI] 点击「...」 @ 路由`，同一路由同一标签 300ms 内去重；给元素加 `data-log-ignore` 可跳过）。页面切换由 `platform/router/index.ts` 的 `router.afterEach` 自动记录（`[Router] 页面切换: A -> B`）。
-- **业务日志**：集中在各模块 store（新建/删除/重命名/标签/搜索、打开书籍/标注等）和同步流程（`SettingsView` 的同步日志会同时写入系统日志）；高频操作做节流（搜索 1s、笔记自动保存 5s），不要逐字符或逐页码写日志。
+- **业务日志**：集中在各模块 store（新建/删除/重命名/标签/搜索、打开书籍/标注等）和同步流程（`settings/useSyncSettings.ts` 的同步日志会同时写入系统日志）；高频操作做节流（搜索 1s、笔记自动保存 5s），不要逐字符或逐页码写日志。
 - **查看**：设置页“系统日志 → 查看日志”打开覆盖式日志面板（文件选择、级别筛选、刷新、日志目录展示）。后端命令为 `write_log`、`list_log_files`、`read_log_file`（单文件最多读取最后 512 KB）、`get_log_dir`。
 - 日志目录初始化失败不应阻塞启动；初始化前只输出到终端。
 
@@ -115,7 +121,7 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
 - 前端日志统一用 `logger`（`platform/services/logger.ts`），Rust 日志统一用 `log_*!` 宏；不要用裸 `console.*` / `println!`
 - 平台类型只有 `'windows' | 'android'`（`module-types.ts`），平台检测在 `module-loader.ts` 的 `detectPlatform()`（目前基于 userAgent 粗略判断）
 - 时间戳统一为 Unix 毫秒（`chrono::Utc::now().timestamp_millis()`）
-- 新增 Rust 命令：在对应 `platform/*.rs` 实现 `#[tauri::command]` → 在 `main.rs` 的 `generate_handler![]` 注册 → 前端在对应 `api.ts` 封装
+- 新增 Rust 命令：在对应 `platform/*.rs` 或 `modules/<id>/*.rs` 实现 `#[tauri::command]` → 在 `commands.rs` 的 `invoke_handler()` 中注册 → 前端在对应 `api.ts` 封装
 - 新增数据表：在 `platform/database_init.rs` 添加建表语句，并同时在 Rust 侧实现读写
 
 ## 实现与设计的已知偏差
@@ -126,4 +132,4 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
 - 设计文档描述操作日志增量同步，实际为全量 payload 交换；`sync_operations` 只写不读
 - 同步未覆盖文件夹、书籍、标注
 - 数据库路径已统一到 `<应用根>/data/mydata.db`（见上“统一 data 目录”）
-- `lib.rs` 移动端入口未接入实际命令注册
+- 设计文档要求用 `public/modules.json` 注册模块（含 `entryPoint`/`enabled`），实际改为 `src/modules/` 自动发现；模块元数据（`icon`/`order`/`enabled`）由 `ModuleInterface` 实例声明

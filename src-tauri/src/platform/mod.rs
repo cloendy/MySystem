@@ -1,12 +1,9 @@
 pub mod config_storage;
 pub mod database_init;
 pub mod discovery;
-pub mod folder_storage;
 pub mod http_client;
 pub mod http_server;
 pub mod logger;
-pub mod notepad_storage;
 pub mod paths;
-pub mod reader_storage;
 pub mod storage;
 pub mod sync_payload;

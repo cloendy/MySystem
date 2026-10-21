@@ -24,6 +24,18 @@ export interface ModuleInterface {
     name: string;
     version: string;
 
+    /** 模块图标（emoji 或字符），用于导航与首页 */
+    icon?: string;
+
+    /** 加载与导航排序，数字小的排在前面，默认 0 */
+    order?: number;
+
+    /**
+     * 平台启用开关，例如 `{ android: false }`。
+     * 未声明的平台默认启用。
+     */
+    enabled?: Partial<Record<Platform, boolean>>;
+
     onLoad(context: ModuleContext): Promise<void>;
     onUnload?(): Promise<void>;
     onActivate?(): void;
@@ -49,15 +61,4 @@ export interface EventBus {
     on(event: string, handler: (payload: unknown) => void): void;
     off(event: string, handler: (payload: unknown) => void): void;
     emit(event: string, payload?: unknown): void;
-}
-
-/**
- * 模块注册表中的条目（对应 modules.json 中一项）
- */
-export interface ModuleRegistration {
-    id: string;
-    name: string;
-    version: string;
-    entryPoint: string;
-    enabled: Record<Platform, boolean>;
 }

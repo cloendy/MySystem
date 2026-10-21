@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { getDeviceId } from '../../platform/services/storage';
+import { getDeviceId } from '../../platform/services/device';
 import type {
     Folder, CreateFolderInput, UpdateFolderInput,
     Note, CreateNoteInput, UpdateNoteInput
