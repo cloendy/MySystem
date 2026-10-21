@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import * as api from '../api';
 import type { Annotation } from '../types';
+import { confirmAction } from '../../../platform/services/dialog';
 
 const props = defineProps<{ bookId: string }>();
 const emit = defineEmits<{
@@ -22,7 +23,7 @@ async function loadAnnotations() {
 }
 
 async function handleDelete(ann: Annotation) {
-    if (!confirm('确定删除这条标注？')) return;
+    if (!(await confirmAction('确定删除这条标注？', '删除标注'))) return;
     await api.deleteAnnotation(ann.id);
     // 通知父组件移除高亮
     try {

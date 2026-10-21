@@ -4,11 +4,22 @@ import { useRouter } from 'vue-router';
 import { useNotepadStore } from '../stores/notepad';
 import FolderTree from '../components/FolderTree.vue';
 import TagFilter from '../components/TagFilter.vue';
+import NoteMenu from '../components/NoteMenu.vue';
+import { DEFAULT_FOLDER_ID } from '../constants';
+import type { MenuAnchor, Note } from '../types';
 import { detectPlatform } from '../../../platform/services/module-loader';
+import { confirmAction } from '../../../platform/services/dialog';
 
 const router = useRouter();
 const store = useNotepadStore();
 const isMobile = detectPlatform() === 'android';
+
+interface MenuState {
+    note: Note;
+    anchor: MenuAnchor;
+}
+
+const menuState = ref<MenuState | null>(null);
 
 const searchInput = ref('');
 let searchTimer: number | null = null;
@@ -21,7 +32,11 @@ watch(searchInput, (val) => {
 });
 
 onMounted(async () => {
-    await store.fetchNotes(store.currentFolderId);
+    await Promise.all([
+        store.fetchNotes(store.currentFolderId),
+        // 移动菜单需要文件夹列表；移动端没有 FolderTree，也在这里加载
+        store.fetchFolders(),
+    ]);
     window.addEventListener('mysystem:sync-completed', handleSyncCompleted);
 });
 
@@ -38,15 +53,40 @@ async function handleCreate() {
     const note = await store.addNote({
         title: '新笔记',
         content: '',
-        folderId: store.currentFolderId,
+        // 在「全部笔记」下新建时放入默认文件夹「未命名」
+        folderId: store.currentFolderId ?? DEFAULT_FOLDER_ID,
     });
     router.push(`/notepad/edit/${note.id}`);
 }
 
-async function handleDelete(id: string, event: MouseEvent) {
+function openNoteMenu(note: Note, event: MouseEvent) {
     event.stopPropagation();
-    if (!confirm('确定删除这条笔记？')) return;
-    await store.removeNote(id);
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    menuState.value = {
+        note,
+        anchor: { top: rect.top, bottom: rect.bottom, right: rect.right },
+    };
+}
+
+async function handleMenuMove(folderId: string) {
+    const note = menuState.value?.note;
+    menuState.value = null;
+    if (!note) return;
+    await store.moveNoteToFolder(note.id, folderId);
+    // 当前在具体文件夹或搜索结果下时，刷新列表以反映移动后的归属
+    if (store.isSearching) {
+        await store.search(store.searchKeyword);
+    } else if (store.currentFolderId) {
+        await store.fetchNotes(store.currentFolderId);
+    }
+}
+
+async function handleMenuDelete() {
+    const note = menuState.value?.note;
+    menuState.value = null;
+    if (!note) return;
+    if (!(await confirmAction('确定删除这条笔记？', '删除笔记'))) return;
+    await store.removeNote(note.id);
 }
 
 function formatTime(ms: number): string {
@@ -134,18 +174,22 @@ const sortedNotes = computed(() => {
                             <span v-if="note.isPinned" class="pin">📌</span>
                             {{ note.title || '无标题' }}
                         </span>
-                        <span class="note-time">{{ formatTime(note.updatedAt) }}</span>
+                        <button class="note-menu-btn" title="更多操作"
+                            @click="openNoteMenu(note, $event)">⋯</button>
                     </div>
                     <div class="note-preview">{{ preview(note.content) || '（无内容）' }}</div>
                     <div class="note-footer">
                         <div class="tags">
                             <span v-for="tag in note.tags" :key="tag" class="tag">#{{ tag }}</span>
                         </div>
-                        <button class="btn btn-danger btn-icon" @click="handleDelete(note.id, $event)">删除</button>
+                        <span class="note-time">{{ formatTime(note.updatedAt) }}</span>
                     </div>
                 </li>
             </ul>
         </div>
+
+        <NoteMenu v-if="menuState" :note="menuState.note" :anchor="menuState.anchor"
+            @close="menuState = null" @move="handleMenuMove" @delete="handleMenuDelete" />
     </div>
 </template>
 
@@ -238,6 +282,23 @@ const sortedNotes = computed(() => {
 .note-time {
     font-size: 12px;
     color: #999;
+    flex-shrink: 0;
+}
+
+.note-menu-btn {
+    border: none;
+    background: transparent;
+    color: #999;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 4px;
+    cursor: pointer;
+    border-radius: 3px;
+}
+
+.note-menu-btn:hover {
+    color: #2c3e50;
+    background: #ececec;
 }
 
 .note-preview {

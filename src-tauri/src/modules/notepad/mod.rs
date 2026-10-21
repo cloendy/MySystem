@@ -51,6 +51,13 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+/// 初始化记事本模块数据：迁移旧文件夹表，并确保默认文件夹「未命名」存在。
+pub fn init(app: &tauri::AppHandle) -> Result<(), String> {
+    let mut conn = open_conn(app)?;
+    folders::migrate_legacy_folders(&mut conn)?;
+    folders::ensure_default_folder(&conn)
+}
+
 fn log_sync_op(
     conn: &Connection,
     document_id: &str,
@@ -105,6 +112,11 @@ pub fn create_note(app: tauri::AppHandle, input: CreateNoteInput) -> Result<Note
     let content = input.content.unwrap_or_default();
     let tags = input.tags.unwrap_or_default();
     let tags_json = serde_json::to_string(&tags).map_err(|e| e.to_string())?;
+    // 未指定文件夹时统一放入默认文件夹「未命名」
+    let folder_id = input
+        .folder_id
+        .clone()
+        .or_else(|| Some(folders::DEFAULT_FOLDER_ID.to_string()));
 
     tx.execute(
         "INSERT INTO documents (id, type, title, created_at, updated_at, deleted_at, version, device_id)
@@ -116,7 +128,7 @@ pub fn create_note(app: tauri::AppHandle, input: CreateNoteInput) -> Result<Note
     tx.execute(
         "INSERT INTO notes (document_id, content, tags, folder_id, is_pinned)
          VALUES (?1, ?2, ?3, ?4, 0)",
-        params![id, content, tags_json, input.folder_id],
+        params![id, content, tags_json, folder_id],
     )
     .map_err(|e| format!("插入笔记失败: {}", e))?;
 
@@ -129,7 +141,7 @@ pub fn create_note(app: tauri::AppHandle, input: CreateNoteInput) -> Result<Note
         title: input.title,
         content,
         tags,
-        folder_id: input.folder_id,
+        folder_id,
         is_pinned: false,
         created_at: ts,
         updated_at: ts,

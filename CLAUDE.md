@@ -6,9 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 个人跨平台系统（MySystem）：基于 **Tauri 2 + Vue 3 + TypeScript + Vite** 的桌面/移动应用，目标是同一套代码运行在 Windows（PC 主机）和 Android（客户端），数据通过局域网同步（PC 为主机，无中心服务器）。
 
-**`personal-system-design-v2.md` 是整个系统的设计依据（spec）**——涉及架构决策、数据结构、同步方案时先查阅该文档。注意文档是设计目标，部分实现已经偏离（见文末“实现与设计的已知偏差”），改代码时以实际代码为准并在必要时同步修正文档。
+**`doc/personal-system-design-v2.md` 是整个系统的设计依据（spec）**——涉及架构决策、数据结构、同步方案时先查阅该文档。注意文档是设计目标，部分实现已经偏离（见文末“实现与设计的已知偏差”，`doc/11-已知偏差与路线图.md` 记录了当前已确认的偏差），改代码时以实际代码为准并在必要时同步修正文档。
 
-当前已实现两个模块：**记事本**（Markdown 编辑/预览、文件夹、标签、置顶、搜索）和 **阅读器**（EPUB/PDF/TXT 阅读、目录、标注高亮、阅读进度）；设置页已接入局域网设备发现与手动同步。
+完整项目文档位于 `doc/`，索引见 `doc/README.md`：系统架构、功能设计、UI、数据库、数据结构、开发 API、开发指南、部署配置、测试排错等。
+
+当前已实现两个模块：**记事本**（Markdown / 纯文本编辑、嵌套文件夹、标签、置顶、搜索）和 **阅读器**（EPUB/PDF/TXT 阅读、目录、标注高亮、阅读进度）；设置页已接入局域网设备发现与手动同步。
 
 ## 常用命令
 
@@ -58,7 +60,7 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
   | 文件 | 职责 |
   |---|---|
   | `notepad/mod.rs` | `create_note`/`get_note`/`list_notes`/`update_note`/`delete_note`/`search_notes`（documents JOIN notes） |
-  | `notepad/folders.rs` | 文件夹 CRUD；删除时把笔记移到未分类、子文件夹提升到根级 |
+  | `notepad/folders.rs` | 文件夹 CRUD，表为 `Note_Folders`（`Folder_ID` 四位补零自增、`Folder_Level` 0/1/2/3、`Folder_Parent_ID`/`Folder_Parent_Name` 冗余父级信息、`Folder_Order` 同级顺序）；最多嵌套 3 层（全部笔记/A/B/C），同级不允许重名；删除时其中笔记和子文件夹移动到被删文件夹的父级（删除根级文件夹时，笔记归入「未命名」、子文件夹保留在根级），子文件夹重名时改名为 `原名_folder_被删文件夹名`；`migrate_legacy_folders` 在启动时把旧 `folders` 表迁移过来并删除旧表，`ensure_default_folder` 创建固定 id 为 `0001`、层级 0、排序 0 的「未命名」 |
   | `reader/mod.rs` | 书籍与标注 CRUD、`read_book_file`、`import_book_file`、`delete_book_file` |
 
 - `platform/` — 平台基础服务（不包含业务逻辑），均直接使用 `rusqlite` 打开 SQLite 文件：
@@ -89,6 +91,7 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
 - 新增存储代码必须复用 `paths.rs`，不要再自行拼 `app_data_dir()` 或 exe 目录。
 - 书籍文件：`import_book_file` 复制到 `<data>/books/`；`delete_book_file` 只允许删除 canonicalize 后位于 `<data>/books/` 内的文件。
 - 统一基表为 `documents`（id/type/title/created_at/updated_at/deleted_at/version/device_id），扩展表通过 `document_id` 外键关联：`notes`、`books`、`annotations`。`annotations` 的主键就是 `document_id`（一条标注 = 一条 `type='annotation'` 的 document）。`sync_state`、`known_devices` 表已建但当前未使用。
+- 记事本文件夹：表为 `Note_Folders`，`Folder_ID` 为四位补零字符串（`0001` 起自增，主键），`Folder_Level` 取 0/1/2/3（0 仅用于默认文件夹，1~3 为嵌套层级，3 之下不可再建），`Folder_Order` 为同级顺序（默认文件夹为 0，其余从 1 开始），`Folder_Flg1~3` 为备用字段。`Folder_Name + Folder_Level + Folder_Parent_ID` 唯一（同级不允许重名，前后端都校验），`Folder_Parent_ID`/`Folder_Parent_Name` 在重命名和移动子文件夹时同步维护。默认文件夹「未命名」固定 `0001 / 层级 0 / 排序 0`，由 `modules::notepad::init` 在启动时创建，新建笔记未指定文件夹时归入其中。旧版 `folders` 表由 `migrate_legacy_folders` 在启动时迁移：`uncategorized` → `0001 未命名`，其余按原层级与顺序重新编号为 `0002` 起，并同步改写 `notes.folder_id`，随后删除旧表。
 
 ### 日志
 

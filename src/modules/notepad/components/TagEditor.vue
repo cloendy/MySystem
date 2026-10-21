@@ -45,6 +45,11 @@ function handleKeydown(e: KeyboardEvent) {
         <input v-if="editing" ref="inputEl" v-model="input" class="text-input tag-input" placeholder="输入标签，回车确认"
             @keydown="handleKeydown" @blur="editing = false" />
         <button v-else class="tag-add" @click="editing = true">+ 添加标签</button>
+
+        <!-- 右侧扩展区：编辑页把模式切换放在这一行最右边 -->
+        <div v-if="$slots.right" class="tag-editor-right">
+            <slot name="right" />
+        </div>
     </div>
 </template>
 
@@ -106,5 +111,12 @@ function handleKeydown(e: KeyboardEvent) {
 .tag-add:hover {
     color: #2c3e50;
     border-color: #2c3e50;
+}
+
+.tag-editor-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 </style>

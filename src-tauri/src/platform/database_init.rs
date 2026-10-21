@@ -31,12 +31,23 @@ pub fn init_database(app: &tauri::AppHandle) -> Result<(), String> {
           is_pinned INTEGER NOT NULL DEFAULT 0
         );
 
-        CREATE TABLE IF NOT EXISTS folders (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          parent_id TEXT,
-          sort_order INTEGER NOT NULL DEFAULT 0
+        CREATE TABLE IF NOT EXISTS Note_Folders (
+          Folder_ID CHAR(4) PRIMARY KEY NOT NULL,
+          Folder_Name VARCHAR(20) NOT NULL,
+          Folder_Level CHAR(1) NOT NULL CHECK (Folder_Level IN ('0', '1', '2', '3')),
+          Folder_Parent_ID CHAR(4),
+          Folder_Parent_Name VARCHAR(20),
+          Folder_Order CHAR(4) NOT NULL,
+          Folder_Flg1 CHAR(10),
+          Folder_Flg2 CHAR(10),
+          Folder_Flg3 CHAR(10)
         );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_unique
+          ON Note_Folders (Folder_Name, Folder_Level, IFNULL(Folder_Parent_ID, ''));
+
+        CREATE INDEX IF NOT EXISTS idx_note_folders_parent_order
+          ON Note_Folders (Folder_Parent_ID, Folder_Order);
 
         CREATE TABLE IF NOT EXISTS books (
           document_id TEXT PRIMARY KEY REFERENCES documents(id),

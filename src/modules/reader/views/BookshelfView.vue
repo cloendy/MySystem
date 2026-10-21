@@ -1,6 +1,7 @@
 <script setup lang="ts">
 
 import { logger } from '../../../platform/services/logger'
+import { confirmAction } from '../../../platform/services/dialog'
 import { onMounted, onUnmounted, computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useReaderStore } from '../stores/reader';
@@ -44,7 +45,7 @@ function openBook(book: Book) {
 
 async function handleDelete(book: Book, event: MouseEvent) {
     event.stopPropagation();
-    if (!confirm(`确定删除《${book.title}》？`)) return;
+    if (!(await confirmAction(`确定删除《${book.title}》？`, '删除书籍'))) return;
     await store.removeBook(book.id);
 }
 

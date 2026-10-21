@@ -42,7 +42,12 @@ export interface CreateFolderInput {
 
 export interface UpdateFolderInput {
     id: string;
-    name?: string;
-    parentId?: string | null;
-    sortOrder?: number;
+    name: string;
+}
+
+/** 笔记操作菜单的锚点：触发按钮在视口中的位置 */
+export interface MenuAnchor {
+    top: number;
+    bottom: number;
+    right: number;
 }

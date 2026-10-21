@@ -25,6 +25,11 @@ pub fn run() {
                 crate::log_error!("[Data] 数据库初始化失败: {}", e);
             }
 
+            // 业务模块的数据初始化（默认文件夹等）
+            if let Err(e) = modules::notepad::init(app.handle()) {
+                crate::log_error!("[Notepad] 模块初始化失败: {}", e);
+            }
+
             // 允许 asset 协议读取 data 目录，用于书籍文件预览
             if let Ok(data_dir) = platform::paths::data_dir(app.handle()) {
                 if let Err(e) = app.asset_protocol_scope().allow_directory(&data_dir, true) {

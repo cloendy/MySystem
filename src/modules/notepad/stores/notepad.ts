@@ -83,7 +83,8 @@ export const useNotepadStore = defineStore('notepad', () => {
     async function removeFolder(id: string) {
         const name = folders.value.find((f) => f.id === id)?.name;
         await api.deleteFolder(id);
-        folders.value = folders.value.filter((f) => f.id !== id);
+        // 子文件夹会被移动到上级，必须重新拉取才能拿到新的 parentId
+        await fetchFolders();
         if (currentFolderId.value === id) {
             currentFolderId.value = null;
             await fetchNotes(null);
