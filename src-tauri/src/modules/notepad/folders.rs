@@ -84,6 +84,200 @@ fn folder_name(conn: &Connection, id: &str) -> Result<Option<String>, String> {
     .map_err(|e| e.to_string())
 }
 
+fn folder_parent(conn: &Connection, id: &str) -> Result<Option<String>, String> {
+    let parent: Option<Option<String>> = conn
+        .query_row(
+            "SELECT Folder_Parent_ID FROM Note_Folders WHERE Folder_ID = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(parent.flatten())
+}
+
+/// 判断表是否存在，用于兼容旧表迁移。
+fn table_exists(conn: &Connection, name: &str) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        params![name],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// 笔记所在文件夹路径，对应 `Note_Content` 的 `Is_Folder` + `Folder1~3`。
+///
+/// `level = 0` 表示默认文件夹「未命名」，此时三个 Folder 列都为空。
+#[derive(Debug, Clone, Default)]
+pub struct FolderPath {
+    pub level: i64,
+    pub folder1: Option<String>,
+    pub folder2: Option<String>,
+    pub folder3: Option<String>,
+}
+
+impl FolderPath {
+    /// 返回可直接写入 SQL 的四列值（层级字符串 + 三个可空编号）。
+    pub fn columns(&self) -> (String, Option<String>, Option<String>, Option<String>) {
+        (
+            self.level.to_string(),
+            self.folder1.clone(),
+            self.folder2.clone(),
+            self.folder3.clone(),
+        )
+    }
+}
+
+/// 解析文件夹的完整路径。
+///
+/// - `folder_id` 为 `None` 或 `0001`：返回默认路径（层级 0，全空）；
+/// - 文件夹不存在：返回 `Ok(None)`，由调用方决定报错还是回退默认；
+/// - 否则沿父链向上取最多三级，返回 `Folder1`（最上层）~`Folder3`（当前层）。
+pub fn resolve_folder_path(
+    conn: &Connection,
+    folder_id: Option<&str>,
+) -> Result<Option<FolderPath>, String> {
+    let Some(folder_id) = folder_id else {
+        return Ok(Some(FolderPath::default()));
+    };
+    if folder_id == DEFAULT_FOLDER_ID {
+        return Ok(Some(FolderPath::default()));
+    }
+
+    let Some(level) = folder_level(conn, folder_id)? else {
+        return Ok(None);
+    };
+    if level == 0 {
+        return Ok(Some(FolderPath::default()));
+    }
+
+    // 当前文件夹在前，最多向上追溯三级
+    let mut chain = vec![folder_id.to_string()];
+    let mut parent = folder_parent(conn, folder_id)?;
+    while let Some(parent_id) = parent {
+        if chain.len() >= MAX_FOLDER_DEPTH as usize {
+            break;
+        }
+        chain.push(parent_id.clone());
+        parent = folder_parent(conn, &parent_id)?;
+    }
+
+    let mut path = FolderPath {
+        level: chain.len() as i64,
+        ..Default::default()
+    };
+    match chain.len() {
+        1 => path.folder1 = chain.first().cloned(),
+        2 => {
+            path.folder2 = chain.first().cloned();
+            path.folder1 = chain.get(1).cloned();
+        }
+        _ => {
+            path.folder3 = chain.first().cloned();
+            path.folder2 = chain.get(1).cloned();
+            path.folder1 = chain.get(2).cloned();
+        }
+    }
+    Ok(Some(path))
+}
+
+/// 把位于 `from_folder_id` 的笔记整体改到 `target` 路径。
+///
+/// 只匹配「当前层级对应列」等于该文件夹 ID 的行，避免误伤位于其后代文件夹中的笔记。
+pub fn move_notes_to_folder(
+    tx: &Transaction,
+    from_folder_id: &str,
+    target: &FolderPath,
+) -> Result<(), String> {
+    let Some(level) = folder_level(tx, from_folder_id)? else {
+        return Ok(());
+    };
+
+    let (level_text, folder1, folder2, folder3) = target.columns();
+    if level == 0 {
+        tx.execute(
+            "UPDATE Note_Content
+             SET Is_Folder = ?1, Folder1 = ?2, Folder2 = ?3, Folder3 = ?4
+             WHERE Is_Folder = '0'",
+            params![level_text, folder1, folder2, folder3],
+        )
+        .map_err(|e| format!("更新笔记文件夹失败: {}", e))?;
+        return Ok(());
+    }
+
+    let level = level.clamp(1, MAX_FOLDER_DEPTH);
+    let column = format!("Folder{}", level);
+    let sql = format!(
+        "UPDATE Note_Content
+         SET Is_Folder = ?1, Folder1 = ?2, Folder2 = ?3, Folder3 = ?4
+         WHERE Is_Folder = ?5 AND {} = ?6",
+        column
+    );
+    tx.execute(
+        &sql,
+        params![
+            level_text,
+            folder1,
+            folder2,
+            folder3,
+            level.to_string(),
+            from_folder_id
+        ],
+    )
+    .map_err(|e| format!("更新笔记文件夹失败: {}", e))?;
+    Ok(())
+}
+
+/// 按 `Note_Content` 中记录的当前文件夹重建 `Is_Folder` + `Folder1~3`。
+///
+/// 文件夹层级变化（例如删除文件夹导致子文件夹整体上移）后调用。
+pub fn refresh_note_paths(tx: &Transaction) -> Result<(), String> {
+    let rows: Vec<(String, String, Option<String>, Option<String>, Option<String>)> = {
+        let mut stmt = tx
+            .prepare(
+                "SELECT Note_ID, Is_Folder, Folder1, Folder2, Folder3 FROM Note_Content",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    };
+
+    for (note_id, is_folder, folder1, folder2, folder3) in rows {
+        // 反推当前所在文件夹；找不到时归入默认文件夹
+        let current = match is_folder.as_str() {
+            "1" => folder1,
+            "2" => folder2,
+            "3" => folder3,
+            _ => None,
+        };
+        let path = match current.as_deref() {
+            Some(id) => resolve_folder_path(tx, Some(id))?.unwrap_or_default(),
+            None => FolderPath::default(),
+        };
+        let (level_text, f1, f2, f3) = path.columns();
+        tx.execute(
+            "UPDATE Note_Content
+             SET Is_Folder = ?1, Folder1 = ?2, Folder2 = ?3, Folder3 = ?4
+             WHERE Note_ID = ?5",
+            params![level_text, f1, f2, f3, note_id],
+        )
+        .map_err(|e| format!("刷新笔记文件夹路径失败: {}", e))?;
+    }
+    Ok(())
+}
+
 /// 生成下一个四位编号（0001 起自增）。
 fn next_folder_id(conn: &Connection) -> Result<String, String> {
     let max: Option<i64> = conn
@@ -135,7 +329,10 @@ fn duplicate_exists(
     .map_err(|e| e.to_string())
 }
 
-/// 确保默认文件夹「未命名」存在，并把无归属的笔记归入其中。
+/// 确保默认文件夹「未命名」存在。
+///
+/// 笔记的文件夹路径由 `Note_Content.Is_Folder` + `Folder1~3` 冗余保存，
+/// 无归属/指向不存在文件夹的笔记由 `refresh_note_paths()` 统一归入「未命名」。
 pub fn ensure_default_folder(conn: &Connection) -> Result<(), String> {
     let level = DEFAULT_FOLDER_LEVEL.to_string();
     conn.execute(
@@ -146,14 +343,6 @@ pub fn ensure_default_folder(conn: &Connection) -> Result<(), String> {
         params![DEFAULT_FOLDER_ID, DEFAULT_FOLDER_NAME, level],
     )
     .map_err(|e| format!("创建默认文件夹失败: {}", e))?;
-
-    conn.execute(
-        "UPDATE notes SET folder_id = ?1
-         WHERE folder_id IS NULL
-            OR folder_id NOT IN (SELECT Folder_ID FROM Note_Folders)",
-        params![DEFAULT_FOLDER_ID],
-    )
-    .map_err(|e| format!("迁移未归属笔记失败: {}", e))?;
 
     Ok(())
 }
@@ -191,6 +380,8 @@ pub fn migrate_legacy_folders(conn: &mut Connection) -> Result<(), String> {
     if !legacy_exists {
         return Ok(());
     }
+    // 旧表升级时 notes 仍存在；若已完成笔记迁移，则只刷新 Note_Content 的路径。
+    let legacy_notes_exists = table_exists(conn, "notes")?;
 
     let legacy: Vec<LegacyFolder> = {
         let mut stmt = conn
@@ -320,24 +511,30 @@ pub fn migrate_legacy_folders(conn: &mut Connection) -> Result<(), String> {
         .map_err(|e| format!("迁移文件夹失败: {}", e))?;
     }
 
-    for (old_id, new_id) in &mapping {
-        if old_id == LEGACY_UNCATEGORIZED_ID {
-            continue;
+    if legacy_notes_exists {
+        for (old_id, new_id) in &mapping {
+            if old_id == LEGACY_UNCATEGORIZED_ID {
+                continue;
+            }
+            tx.execute(
+                "UPDATE notes SET folder_id = ?1 WHERE folder_id = ?2",
+                params![new_id, old_id],
+            )
+            .map_err(|e| e.to_string())?;
         }
         tx.execute(
             "UPDATE notes SET folder_id = ?1 WHERE folder_id = ?2",
-            params![new_id, old_id],
+            params![DEFAULT_FOLDER_ID, LEGACY_UNCATEGORIZED_ID],
         )
         .map_err(|e| e.to_string())?;
     }
-    tx.execute(
-        "UPDATE notes SET folder_id = ?1 WHERE folder_id = ?2",
-        params![DEFAULT_FOLDER_ID, LEGACY_UNCATEGORIZED_ID],
-    )
-    .map_err(|e| e.to_string())?;
 
     tx.execute("DROP TABLE folders", [])
         .map_err(|e| format!("删除旧文件夹表失败: {}", e))?;
+
+    // 若笔记已迁移到 Note_Content，按新的文件夹编号重建路径
+    refresh_note_paths(&tx)?;
+
     tx.commit().map_err(|e| e.to_string())?;
 
     crate::log_info!(
@@ -582,11 +779,9 @@ pub fn delete_folder(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let note_target = parent_id
         .clone()
         .unwrap_or_else(|| DEFAULT_FOLDER_ID.to_string());
-    tx.execute(
-        "UPDATE notes SET folder_id = ?1 WHERE folder_id = ?2",
-        params![note_target, id],
-    )
-    .map_err(|e| e.to_string())?;
+    let target_path = resolve_folder_path(&tx, Some(&note_target))?
+        .unwrap_or_default();
+    move_notes_to_folder(&tx, &id, &target_path)?;
 
     // 子文件夹上移一级，追加到新父级的末尾
     let base_order: i64 = tx
@@ -638,6 +833,9 @@ pub fn delete_folder(app: tauri::AppHandle, id: String) -> Result<(), String> {
 
     tx.execute("DELETE FROM Note_Folders WHERE Folder_ID = ?1", params![id])
         .map_err(|e| e.to_string())?;
+
+    // 子文件夹层级整体上移后，其内部笔记的 Is_Folder/Folder1~3 需要重建
+    refresh_note_paths(&tx)?;
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())

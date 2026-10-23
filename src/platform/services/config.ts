@@ -109,6 +109,7 @@ export interface SyncPayload {
         version: number;
         deviceId: string;
     }>;
+    /** 笔记已改用独立的 Note_Content 表，暂不参与同步；该字段仅为兼容保留，始终为空 */
     notes: Array<{
         documentId: string;
         content: string;

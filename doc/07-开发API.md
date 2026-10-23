@@ -168,8 +168,9 @@ exchange_sync_data(ipAddress, payload): Promise<SyncResponse>    // 30s 超时
 }
 ```
 
-- `folderId` 省略或为 `null` 时，后端自动设为 `0001`（未命名）。
-- 写入 `documents(type='note')` 与 `notes`，同时写一条 `sync_operations(create)`。
+- `folderId` 省略或为 `null` 时，后端自动设为 `0001`（未命名）；传入不存在的文件夹返回「文件夹不存在」。
+- `title` 超过 20 个字符时返回「笔记标题不能超过 20 个字符」。
+- 写入 `Note_Content`（`Note_ID` 取 `MAX+1` 补零到十位，`Version = 1`，`Device_ID` 取输入设备，并按目标文件夹解析 `Is_Folder` + `Folder1~3`），同时写一条 `sync_operations(create)`，`document_id` 使用 `Note_ID`。
 - 返回完整 `Note`。
 
 ### `list_notes`
@@ -177,26 +178,29 @@ exchange_sync_data(ipAddress, payload): Promise<SyncResponse>    // 30s 超时
 参数 `folderId`：
 
 - `null`：返回全部未删除笔记；
-- 字符串：只返回该文件夹下的笔记。
+- `"0001"`：只返回 `Is_Folder = '0'` 的笔记；
+- 其他字符串：按「当前层级对应的列」筛选（`Is_Folder='1' AND Folder1=?` 或 `'2' AND Folder2=?` 或 `'3' AND Folder3=?`），避免把后代文件夹中的笔记误算进来。
 
-排序：`is_pinned DESC, updated_at DESC`。
+排序：`Is_Pinned DESC, Update_Time DESC`。
 
 ### `update_note`
 
 - 任意字段可选；`None` 不更新。
-- 只要调用，`documents.updated_at` 会更新、`version + 1`、`device_id` 改为当前设备。
-- `title` 传空字符串会清空标题；`content` 传空字符串会清空正文。
-- `folderId` 不能通过 `null` 清空（Rust `Option` 语义）；移动请传具体文件夹 ID。
+- 只要调用，`Note_Content.Update_Time` 会更新、`Version + 1`、`Device_ID` 改为当前设备（`Note_ID` 不变）。
+- `title` 传空字符串会清空标题；超过 20 个字符返回错误。
+- `content` 传空字符串会清空正文。
+- `folderId` 有值时重新解析 `Is_Folder` + `Folder1~3`；不能通过 `null` 清空（Rust `Option` 语义），移动请传具体文件夹 ID。
+- `isPinned` 传 `false` 可以取消置顶（`Option<bool>`）。
 - 返回更新后的完整 `Note`。
 
 ### `delete_note`
 
-软删除；`affected == 0` 时返回「笔记不存在或已删除」。
+软删除（`Delete_Time = Update_Time = now`，`Version + 1`，`Device_ID` 改为当前设备）；`affected == 0` 时返回「笔记不存在或已删除」。
 
 ### `search_notes`
 
 - 关键词为空（trim 后）返回空数组；
-- 使用 `LIKE '%keyword%'` 同时匹配标题与正文，区分大小写行为由 SQLite 默认决定（ASCII 不区分，中文按字节匹配）。
+- 使用 `LIKE '%keyword%'` 同时匹配 `Note_Title` 与 `Note_Content`，区分大小写行为由 SQLite 默认决定（ASCII 不区分，中文按字节匹配）。
 
 ### `create_folder`
 
@@ -359,7 +363,7 @@ exchange_sync_data(ipAddress, payload): Promise<SyncResponse>    // 30s 超时
   "documents": [
     {
       "id": "uuid",
-      "type": "note",
+      "type": "book",
       "title": "标题",
       "createdAt": 1730000000000,
       "updatedAt": 1730000000000,
@@ -368,19 +372,13 @@ exchange_sync_data(ipAddress, payload): Promise<SyncResponse>    // 30s 超时
       "deviceId": "uuid"
     }
   ],
-  "notes": [
-    {
-      "documentId": "uuid",
-      "content": "正文",
-      "tags": "[\"学习\"]",
-      "folderId": "0001",
-      "isPinned": 0
-    }
-  ],
+  "notes": [],
   "senderDeviceId": "uuid",
   "senderDeviceName": "发起方"
 }
 ```
+
+说明：笔记已迁至独立的 `Note_Content` 表，本次不参与同步——`documents` 只包含非 `note` 类型，`notes` 始终为空；服务端合并时跳过 `type = "note"` 的文档并忽略收到的 `notes`。字段保留仅为新旧客户端兼容。
 
 响应 200：`SyncResponse`
 

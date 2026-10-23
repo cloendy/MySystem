@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 个人跨平台系统（MySystem）：基于 **Tauri 2 + Vue 3 + TypeScript + Vite** 的桌面/移动应用，目标是同一套代码运行在 Windows（PC 主机）和 Android（客户端），数据通过局域网同步（PC 为主机，无中心服务器）。
 
-**`doc/personal-system-design-v2.md` 是整个系统的设计依据（spec）**——涉及架构决策、数据结构、同步方案时先查阅该文档。注意文档是设计目标，部分实现已经偏离（见文末“实现与设计的已知偏差”，`doc/11-已知偏差与路线图.md` 记录了当前已确认的偏差），改代码时以实际代码为准并在必要时同步修正文档。
+**`doc/` 下的 01~12 号文档是当前系统的参考文档**（索引见 `doc/README.md`）——涉及架构、数据结构、同步方案时先查阅这些文档与 `doc/11-已知偏差与路线图.md`。文档以当前代码实现为准；原始设计文档 `personal-system-design-v2.md` 已归档到 `doc/backup/_2026102201/`，不再作为参考。改代码时以实际代码为准并在必要时同步修正文档。
 
 完整项目文档位于 `doc/`，索引见 `doc/README.md`：系统架构、功能设计、UI、数据库、数据结构、开发 API、开发指南、部署配置、测试排错等。
 
@@ -59,8 +59,8 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
 
   | 文件 | 职责 |
   |---|---|
-  | `notepad/mod.rs` | `create_note`/`get_note`/`list_notes`/`update_note`/`delete_note`/`search_notes`（documents JOIN notes） |
-  | `notepad/folders.rs` | 文件夹 CRUD，表为 `Note_Folders`（`Folder_ID` 四位补零自增、`Folder_Level` 0/1/2/3、`Folder_Parent_ID`/`Folder_Parent_Name` 冗余父级信息、`Folder_Order` 同级顺序）；最多嵌套 3 层（全部笔记/A/B/C），同级不允许重名；删除时其中笔记和子文件夹移动到被删文件夹的父级（删除根级文件夹时，笔记归入「未命名」、子文件夹保留在根级），子文件夹重名时改名为 `原名_folder_被删文件夹名`；`migrate_legacy_folders` 在启动时把旧 `folders` 表迁移过来并删除旧表，`ensure_default_folder` 创建固定 id 为 `0001`、层级 0、排序 0 的「未命名」 |
+  | `notepad/mod.rs` | `create_note`/`get_note`/`list_notes`/`update_note`/`delete_note`/`search_notes`；表为独立的 `Note_Content`（`Note_ID` 十位补零自增主键、`Note_Title` 最多 20 字符、`Delete_Time` 软删除、`Is_Pinned` 置顶、`Device_ID`/`Version` 写入记录、`Tags` 存 JSON；`Is_Folder` + `Folder1~3` 冗余文件夹路径） |
+  | `notepad/folders.rs` | 文件夹 CRUD，表为 `Note_Folders`（`Folder_ID` 四位补零自增、`Folder_Level` 0/1/2/3、`Folder_Parent_ID`/`Folder_Parent_Name` 冗余父级信息、`Folder_Order` 同级顺序）；最多嵌套 3 层（全部笔记/A/B/C），同级不允许重名；删除时其中笔记和子文件夹移动到被删文件夹的父级（删除根级文件夹时，笔记归入「未命名」、子文件夹保留在根级），子文件夹重名时改名为 `原名_folder_被删文件夹名`；`migrate_legacy_folders` 在启动时把旧 `folders` 表迁移过来并删除旧表，`ensure_default_folder` 创建固定 id 为 `0001`、层级 0、排序 0 的「未命名」；`refresh_note_paths` 按 `Note_Folders` 父链重建 `Note_Content` 的四列路径 |
   | `reader/mod.rs` | 书籍与标注 CRUD、`read_book_file`、`import_book_file`、`delete_book_file` |
 
 - `platform/` — 平台基础服务（不包含业务逻辑），均直接使用 `rusqlite` 打开 SQLite 文件：
@@ -90,8 +90,9 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
   - `log_dir()`：`<data>/log`
 - 新增存储代码必须复用 `paths.rs`，不要再自行拼 `app_data_dir()` 或 exe 目录。
 - 书籍文件：`import_book_file` 复制到 `<data>/books/`；`delete_book_file` 只允许删除 canonicalize 后位于 `<data>/books/` 内的文件。
-- 统一基表为 `documents`（id/type/title/created_at/updated_at/deleted_at/version/device_id），扩展表通过 `document_id` 外键关联：`notes`、`books`、`annotations`。`annotations` 的主键就是 `document_id`（一条标注 = 一条 `type='annotation'` 的 document）。`sync_state`、`known_devices` 表已建但当前未使用。
-- 记事本文件夹：表为 `Note_Folders`，`Folder_ID` 为四位补零字符串（`0001` 起自增，主键），`Folder_Level` 取 0/1/2/3（0 仅用于默认文件夹，1~3 为嵌套层级，3 之下不可再建），`Folder_Order` 为同级顺序（默认文件夹为 0，其余从 1 开始），`Folder_Flg1~3` 为备用字段。`Folder_Name + Folder_Level + Folder_Parent_ID` 唯一（同级不允许重名，前后端都校验），`Folder_Parent_ID`/`Folder_Parent_Name` 在重命名和移动子文件夹时同步维护。默认文件夹「未命名」固定 `0001 / 层级 0 / 排序 0`，由 `modules::notepad::init` 在启动时创建，新建笔记未指定文件夹时归入其中。旧版 `folders` 表由 `migrate_legacy_folders` 在启动时迁移：`uncategorized` → `0001 未命名`，其余按原层级与顺序重新编号为 `0002` 起，并同步改写 `notes.folder_id`，随后删除旧表。
+- 统一基表为 `documents`（id/type/title/created_at/updated_at/deleted_at/version/device_id），阅读器扩展表通过 `document_id` 外键关联：`books`、`annotations`。`annotations` 的主键就是 `document_id`（一条标注 = 一条 `type='annotation'` 的 document）。`sync_state`、`known_devices` 表已建但当前未使用。
+- 记事本笔记使用**独立表 `Note_Content`**，不再写入 `documents`：主键 `Note_ID` 为十位补零字符串（`0000000001` 起自增），标题 `Note_Title` 最多 20 字符（前后端都校验/限制），`Delete_Time` 软删除，`Is_Pinned` 为 `'0'`/`'1'`，`Device_ID` / `Version` 记录最后写入设备与版本（创建 1，更新/删除 +1）；文件夹路径冗余在 `Is_Folder` + `Folder1~3`（`0` 表示「未命名」且三列全空，`N` 表示当前文件夹 ID 放在 `FolderN`，父链依次向前填）。启动时 `ensure_note_content_columns` 补齐后加列，`migrate_legacy_notes` 把旧 `notes` + `documents(type='note')` 迁移过来并删除旧数据/旧表（需先删 `notes` 再删 `documents`，否则外键检查失败）。
+- 记事本文件夹：表为 `Note_Folders`，`Folder_ID` 为四位补零字符串（`0001` 起自增，主键），`Folder_Level` 取 0/1/2/3（0 仅用于默认文件夹，1~3 为嵌套层级，3 之下不可再建），`Folder_Order` 为同级顺序（默认文件夹为 0，其余从 1 开始），`Folder_Flg1~3` 为备用字段。`Folder_Name + Folder_Level + Folder_Parent_ID` 唯一（同级不允许重名，前后端都校验），`Folder_Parent_ID`/`Folder_Parent_Name` 在重命名和移动子文件夹时同步维护。默认文件夹「未命名」固定 `0001 / 层级 0 / 排序 0`，由 `modules::notepad::init` 在启动时创建，新建笔记未指定文件夹时归入其中。旧版 `folders` 表由 `migrate_legacy_folders` 在启动时迁移：`uncategorized` → `0001 未命名`，其余按原层级与顺序重新编号为 `0002` 起，随后删除旧表。文件夹层级/父级变化后由 `refresh_note_paths` 重建 `Note_Content` 的 `Is_Folder` + `Folder1~3`。
 
 ### 日志
 
@@ -107,7 +108,7 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
 - **发现**：UDP 54321 广播 `discover` 消息，监听方回复 `announce`；设备 ID/名称/平台随消息携带。
 - **交换**：HTTP 54322，`GET /api/info` 握手，`POST /api/sync/exchange` 交换数据。
 - **流程**（设置页手动触发）：本机 `get_sync_payload` 读出全量 → `exchange_sync_data` 发给对方 → 对方 `merge_payload` 并按 `updated_at` 合并（新覆盖旧，相等或本地更新则拒绝）→ 对方返回自己的全量 `server_payload` → 本机 `apply_local_payload` 再合并一次。
-- **范围**：payload 只包含 `documents` + `notes`，**不含** `folders`、`books`、`annotations`；目前是全量交换，未使用 `sync_operations` 增量日志。
+- **范围**：payload 只包含 `documents` 中**非 `note` 类型**的记录；笔记（`Note_Content`）、文件夹、书籍、标注均不同步。`notes` 字段固定为空数组以兼容旧客户端，合并时忽略。目前是全量交换，未使用 `sync_operations` 增量日志。
 - 端口目前硬编码（54321/54322）；`config.ts` 中的 `CONFIG_KEYS.SYNC_PORT` 尚未生效。同步相关配置存在 `app_config`：`sync.receive.enabled`、`device.name`。
 - 全局搜索尚未接入：`ModuleInterface.onSearch` 已定义，但 `AppShell` 的搜索框仍是 disabled。
 
@@ -124,15 +125,16 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
 - 前端日志统一用 `logger`（`platform/services/logger.ts`），Rust 日志统一用 `log_*!` 宏；不要用裸 `console.*` / `println!`
 - 平台类型只有 `'windows' | 'android'`（`module-types.ts`），平台检测在 `module-loader.ts` 的 `detectPlatform()`（目前基于 userAgent 粗略判断）
 - 时间戳统一为 Unix 毫秒（`chrono::Utc::now().timestamp_millis()`）
+- 笔记标题最多 20 个字符：编辑页 `maxlength=20`，Rust 侧 `chars().count()` 校验，超出返回错误
 - 新增 Rust 命令：在对应 `platform/*.rs` 或 `modules/<id>/*.rs` 实现 `#[tauri::command]` → 在 `commands.rs` 的 `invoke_handler()` 中注册 → 前端在对应 `api.ts` 封装
 - 新增数据表：在 `platform/database_init.rs` 添加建表语句，并同时在 Rust 侧实现读写
 
-## 实现与设计的已知偏差
+## 实现与历史设计的已知偏差
 
-改动前请知悉，必要时先与用户确认是修实现还是改文档：
+以下是当前实现与已归档的 `personal-system-design-v2.md` 之间的差异，仅用于追溯设计意图。改动前请知悉，必要时先与用户确认是修实现还是改文档：
 
 - 设计文档要求 UUID v7（时间有序），实际使用 `uuid::Uuid::new_v4()`
 - 设计文档描述操作日志增量同步，实际为全量 payload 交换；`sync_operations` 只写不读
-- 同步未覆盖文件夹、书籍、标注
+- 同步未覆盖笔记、文件夹、书籍、标注（笔记因 `Note_ID` 各设备独立自增，本次明确暂停）
 - 数据库路径已统一到 `<应用根>/data/mydata.db`（见上“统一 data 目录”）
 - 设计文档要求用 `public/modules.json` 注册模块（含 `entryPoint`/`enabled`），实际改为 `src/modules/` 自动发现；模块元数据（`icon`/`order`/`enabled`）由 `ModuleInterface` 实例声明

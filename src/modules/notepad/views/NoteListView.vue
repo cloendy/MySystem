@@ -81,6 +81,17 @@ async function handleMenuMove(folderId: string) {
     }
 }
 
+async function handleMenuPin() {
+    const note = menuState.value?.note;
+    menuState.value = null;
+    if (!note) return;
+    await store.togglePin(note.id);
+    // 搜索结果不在 notes 列表里，需要重新查询才能反映置顶状态
+    if (store.isSearching) {
+        await store.search(store.searchKeyword);
+    }
+}
+
 async function handleMenuDelete() {
     const note = menuState.value?.note;
     menuState.value = null;
@@ -170,12 +181,17 @@ const sortedNotes = computed(() => {
                 <li v-for="note in sortedNotes" :key="note.id" class="note-item"
                     @click="router.push(`/notepad/edit/${note.id}`)">
                     <div class="note-header">
-                        <span class="note-title">
-                            <span v-if="note.isPinned" class="pin">📌</span>
-                            {{ note.title || '无标题' }}
-                        </span>
-                        <button class="note-menu-btn" title="更多操作"
-                            @click="openNoteMenu(note, $event)">⋯</button>
+                        <span class="note-title">{{ note.title || '无标题' }}</span>
+                        <div class="note-actions">
+                            <span v-if="note.isPinned" class="pin" title="已置顶" aria-label="已置顶">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path
+                                        d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z" />
+                                </svg>
+                            </span>
+                            <button class="note-menu-btn" title="更多操作"
+                                @click="openNoteMenu(note, $event)">⋯</button>
+                        </div>
                     </div>
                     <div class="note-preview">{{ preview(note.content) || '（无内容）' }}</div>
                     <div class="note-footer">
@@ -189,7 +205,8 @@ const sortedNotes = computed(() => {
         </div>
 
         <NoteMenu v-if="menuState" :note="menuState.note" :anchor="menuState.anchor"
-            @close="menuState = null" @move="handleMenuMove" @delete="handleMenuDelete" />
+            @close="menuState = null" @pin="handleMenuPin" @move="handleMenuMove"
+            @delete="handleMenuDelete" />
     </div>
 </template>
 
@@ -264,7 +281,8 @@ const sortedNotes = computed(() => {
 .note-header {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
+    align-items: center;
+    gap: 8px;
     margin-bottom: 6px;
 }
 
@@ -274,9 +292,24 @@ const sortedNotes = computed(() => {
     color: #333;
 }
 
+.note-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+/* 置顶标记：浅灰图标，位于「⋯」左侧 */
 .pin {
-    font-size: 12px;
-    margin-right: 4px;
+    display: inline-flex;
+    align-items: center;
+    color: #c8ccd0;
+}
+
+.pin svg {
+    width: 14px;
+    height: 14px;
+    fill: currentColor;
 }
 
 .note-time {

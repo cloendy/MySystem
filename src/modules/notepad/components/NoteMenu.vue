@@ -13,6 +13,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     close: [];
+    pin: [];
     move: [folderId: string];
     delete: [];
 }>();
@@ -47,6 +48,9 @@ function handleMove(folderId: string) {
         visibility: position.ready ? 'visible' : 'hidden',
     }" @mousedown.stop @click.stop>
         <template v-if="view === 'root'">
+            <button class="menu-item" @click="emit('pin')">
+                {{ note.isPinned ? '取消置顶' : '置顶' }}
+            </button>
             <button class="menu-item" @click="view = 'folders'">
                 移动
                 <span class="chevron">›</span>

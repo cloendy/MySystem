@@ -56,7 +56,8 @@ pub fn read_local_payload(
     let mut doc_stmt = conn
         .prepare(
             "SELECT id, type, title, created_at, updated_at, deleted_at, version, device_id
-             FROM documents",
+             FROM documents
+             WHERE type != 'note'",
         )
         .map_err(|e| e.to_string())?;
     let docs = doc_stmt
@@ -76,26 +77,11 @@ pub fn read_local_payload(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
-    let mut note_stmt = conn
-        .prepare("SELECT document_id, content, tags, folder_id, is_pinned FROM notes")
-        .map_err(|e| e.to_string())?;
-    let notes = note_stmt
-        .query_map([], |row| {
-            Ok(NotePayload {
-                document_id: row.get(0)?,
-                content: row.get(1)?,
-                tags: row.get(2)?,
-                folder_id: row.get(3)?,
-                is_pinned: row.get(4)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
     Ok(SyncPayload {
         documents: docs,
-        notes,
+        // 笔记已改用独立的 Note_Content 表，跨设备 ID 会冲突，暂不参与同步；
+        // 保留空数组以兼容旧版本的 payload 结构。
+        notes: Vec::new(),
         sender_device_id: device_id.to_string(),
         sender_device_name: device_name.to_string(),
     })
@@ -113,6 +99,11 @@ pub fn merge_payload(
     let mut merged = 0usize;
 
     for doc in &incoming.documents {
+        // 笔记已改用独立的 Note_Content 表，忽略旧客户端发来的笔记文档
+        if doc.r#type == "note" {
+            continue;
+        }
+
         // 查询本地是否有该文档
         let local: Option<(i64, i64)> = tx
             .query_row(
@@ -135,15 +126,6 @@ pub fn merge_payload(
                 )
                 .map_err(|e| format!("插入文档失败: {}", e))?;
 
-                // 同时插入 notes 附属数据
-                if let Some(note) = incoming.notes.iter().find(|n| n.document_id == doc.id) {
-                    tx.execute(
-                        "INSERT OR REPLACE INTO notes (document_id, content, tags, folder_id, is_pinned)
-                         VALUES (?1, ?2, ?3, ?4, ?5)",
-                        params![note.document_id, note.content, note.tags, note.folder_id, note.is_pinned],
-                    )
-                    .map_err(|e| format!("插入笔记失败: {}", e))?;
-                }
                 accepted += 1;
             }
             Some((local_updated, _local_version)) => {
@@ -164,14 +146,6 @@ pub fn merge_payload(
                     )
                     .map_err(|e| format!("更新文档失败: {}", e))?;
 
-                    if let Some(note) = incoming.notes.iter().find(|n| n.document_id == doc.id) {
-                        tx.execute(
-                            "INSERT OR REPLACE INTO notes (document_id, content, tags, folder_id, is_pinned)
-                             VALUES (?1, ?2, ?3, ?4, ?5)",
-                            params![note.document_id, note.content, note.tags, note.folder_id, note.is_pinned],
-                        )
-                        .map_err(|e| format!("更新笔记失败: {}", e))?;
-                    }
                     merged += 1;
                 } else if doc.updated_at == local_updated {
                     // 时间相同，视为无变化

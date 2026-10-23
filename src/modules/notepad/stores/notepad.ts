@@ -104,6 +104,15 @@ export const useNotepadStore = defineStore('notepad', () => {
         await editNote({ id: noteId, folderId });
     }
 
+    async function togglePin(noteId: string) {
+        const note = notes.value.find((n) => n.id === noteId)
+            ?? (currentNote.value?.id === noteId ? currentNote.value : null);
+        if (!note) return;
+        const pinned = !note.isPinned;
+        await editNote({ id: noteId, isPinned: pinned });
+        logger.info(`[Notepad] ${pinned ? '置顶' : '取消置顶'}笔记: ${note.title || noteId}`);
+    }
+
     const allTags = computed(() => {
         const tagCount = new Map<string, number>();
         for (const note of notes.value) {
@@ -177,6 +186,7 @@ export const useNotepadStore = defineStore('notepad', () => {
         removeFolder,
         selectFolder,
         moveNoteToFolder,
+        togglePin,
         selectTag,
         addTagToNote,
         removeTagFromNote,

@@ -8,8 +8,10 @@ export interface Note {
     createdAt: number;
     updatedAt: number;
     deletedAt: number | null;
-    version: number;
+    /** 最后写入设备 ID */
     deviceId: string;
+    /** 每次创建/更新/删除 +1 */
+    version: number;
 }
 
 export interface Folder {

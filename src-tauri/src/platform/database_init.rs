@@ -23,13 +23,28 @@ pub fn init_database(app: &tauri::AppHandle) -> Result<(), String> {
           device_id TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS notes (
-          document_id TEXT PRIMARY KEY REFERENCES documents(id),
-          content TEXT NOT NULL DEFAULT '',
-          tags TEXT NOT NULL DEFAULT '[]',
-          folder_id TEXT,
-          is_pinned INTEGER NOT NULL DEFAULT 0
+        CREATE TABLE IF NOT EXISTS Note_Content (
+          Note_ID VARCHAR(10) PRIMARY KEY NOT NULL,
+          Note_Title VARCHAR(20) NOT NULL DEFAULT '',
+          Note_Content TEXT NOT NULL DEFAULT '',
+          Tags TEXT NOT NULL DEFAULT '[]',
+          Create_Time INTEGER NOT NULL,
+          Update_Time INTEGER NOT NULL,
+          Delete_Time INTEGER,
+          Device_ID TEXT NOT NULL DEFAULT '',
+          Version INTEGER NOT NULL DEFAULT 1,
+          Is_Folder CHAR(1) NOT NULL DEFAULT '0' CHECK (Is_Folder IN ('0', '1', '2', '3')),
+          Folder1 CHAR(4),
+          Folder2 CHAR(4),
+          Folder3 CHAR(4),
+          Is_Pinned CHAR(1) NOT NULL DEFAULT '0' CHECK (Is_Pinned IN ('0', '1'))
         );
+
+        CREATE INDEX IF NOT EXISTS idx_note_content_folder
+          ON Note_Content (Is_Folder, Folder1, Folder2, Folder3);
+
+        CREATE INDEX IF NOT EXISTS idx_note_content_list
+          ON Note_Content (Delete_Time, Is_Pinned, Update_Time);
 
         CREATE TABLE IF NOT EXISTS Note_Folders (
           Folder_ID CHAR(4) PRIMARY KEY NOT NULL,
