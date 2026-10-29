@@ -46,11 +46,6 @@ export async function deleteAnnotation(id: string): Promise<void> {
     await invoke('delete_annotation', { id, deviceId: getDeviceId() });
 }
 
-export async function readBookFile(filePath: string): Promise<Uint8Array> {
-    const bytes = await invoke<number[]>('read_book_file', { filePath });
-    return new Uint8Array(bytes);
-}
-
 export interface ImportedBookResult {
     filePath: string;
     fileFormat: string;

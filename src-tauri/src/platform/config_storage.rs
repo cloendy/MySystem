@@ -34,11 +34,3 @@ pub fn set_config(app: tauri::AppHandle, key: String, value: String) -> Result<(
     .map_err(|e| format!("写入配置失败: {}", e))?;
     Ok(())
 }
-
-#[tauri::command]
-pub fn delete_config(app: tauri::AppHandle, key: String) -> Result<(), String> {
-    let conn = open_conn(&app)?;
-    conn.execute("DELETE FROM app_config WHERE key = ?1", params![key])
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}

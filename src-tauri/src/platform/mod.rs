@@ -5,5 +5,4 @@ pub mod http_client;
 pub mod http_server;
 pub mod logger;
 pub mod paths;
-pub mod storage;
 pub mod sync_payload;

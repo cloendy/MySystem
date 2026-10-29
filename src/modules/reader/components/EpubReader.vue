@@ -30,6 +30,7 @@ const appliedHighlights = new Set<string>();
 const viewerEl = ref<HTMLDivElement | null>(null);
 const toc = ref<Array<{ label: string; href: string; level: number }>>([]);
 const currentChapter = ref('');
+const currentTocIndex = ref(-1);
 const loading = ref(true);
 const errorMsg = ref('');
 
@@ -57,6 +58,23 @@ function flattenToc(
         }
     }
     return result;
+}
+
+/** 记录当前位置，并同步目录中高亮的章节 */
+function updateLocation(location: any) {
+    const cfi = location?.start?.cfi;
+    if (cfi) localStorage.setItem(`epub_pos_${props.book.id}`, cfi);
+
+    const href = location?.start?.href;
+    if (!href) return;
+
+    const target = String(href).split('#')[0];
+    const idx = toc.value.findIndex((item) => {
+        const itemHref = item.href.split('#')[0];
+        return target === itemHref || target.endsWith(itemHref) || itemHref.endsWith(target);
+    });
+    currentTocIndex.value = idx;
+    currentChapter.value = idx >= 0 ? toc.value[idx].label : '';
 }
 
 async function load() {
@@ -106,15 +124,15 @@ async function load() {
         toc.value = [];
     }
 
-    rendition.on('relocated', (location: any) => {
-        const cfi = location?.start?.cfi;
-        if (cfi) localStorage.setItem(`epub_pos_${props.book.id}`, cfi);
-        const href = location?.start?.href;
-        if (href) {
-            const match = toc.value.find((t) => href.includes(t.href.split('#')[0]));
-            currentChapter.value = match?.label ?? '';
-        }
-    });
+    rendition.on('relocated', updateLocation);
+
+    // 首次打开时主动同步一次位置，保证目录能定位到当前章节
+    try {
+        const location = await (rendition as any).currentLocation?.();
+        if (location) updateLocation(location);
+    } catch {
+        // 忽略：部分版本可能不支持 currentLocation
+    }
 
     // 监听选中事件
     rendition.on('selected', (cfiRange: string, contents: any) => {
@@ -294,6 +312,7 @@ defineExpose({
     removeAnnotationHighlight,
     toc,
     currentChapter,
+    currentTocIndex,
 });
 </script>
 

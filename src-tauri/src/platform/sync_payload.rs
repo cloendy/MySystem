@@ -43,10 +43,6 @@ pub struct SyncResponse {
 
 use rusqlite::{Connection, params};
 
-// fn now_ms() -> i64 {
-//     chrono::Utc::now().timestamp_millis()
-// }
-
 /// 从数据库读取全量文档和笔记
 pub fn read_local_payload(
     conn: &Connection,

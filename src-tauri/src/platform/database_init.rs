@@ -96,26 +96,6 @@ pub fn init_database(app: &tauri::AppHandle) -> Result<(), String> {
           synced INTEGER NOT NULL DEFAULT 0
         );
 
-        CREATE TABLE IF NOT EXISTS sync_state (
-          id INTEGER PRIMARY KEY DEFAULT 1,
-          last_sync_timestamp INTEGER,
-          last_sync_device_id TEXT,
-          pending_operations_count INTEGER DEFAULT 0,
-          host_device_id TEXT,
-          host_ip TEXT,
-          host_port INTEGER
-        );
-
-        CREATE TABLE IF NOT EXISTS known_devices (
-          device_id TEXT PRIMARY KEY,
-          device_name TEXT,
-          device_type TEXT,
-          ip_address TEXT,
-          port INTEGER,
-          last_seen_at INTEGER,
-          is_host INTEGER DEFAULT 0
-        );
-
         CREATE TABLE IF NOT EXISTS app_config (
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL,

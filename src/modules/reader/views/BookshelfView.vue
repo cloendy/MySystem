@@ -7,7 +7,6 @@ import { useRouter } from 'vue-router';
 import { useReaderStore } from '../stores/reader';
 import type { Book } from '../types';
 import { open } from '@tauri-apps/plugin-dialog';
-// import { readFile } from '@tauri-apps/plugin-fs';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import ePub from 'epubjs';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -20,6 +19,29 @@ const router = useRouter();
 const store = useReaderStore();
 const filter = ref<'all' | 'reading' | 'finished' | 'unread'>('all');
 const importing = ref(false);
+
+// 显示模式：网格 / 列表（持久化到 localStorage）
+const VIEW_MODE_KEY = 'mysystem_bookshelf_view';
+const viewMode = ref<'grid' | 'list'>(readViewMode());
+
+function readViewMode(): 'grid' | 'list' {
+    try {
+        return localStorage.getItem(VIEW_MODE_KEY) === 'list' ? 'list' : 'grid';
+    } catch {
+        return 'grid';
+    }
+}
+
+function setViewMode(mode: 'grid' | 'list') {
+    if (viewMode.value === mode) return;
+    viewMode.value = mode;
+    try {
+        localStorage.setItem(VIEW_MODE_KEY, mode);
+    } catch {
+        // localStorage 不可用时仅本次会话生效
+    }
+    logger.info(`[Bookshelf] 切换为${mode === 'grid' ? '网格' : '列表'}视图`);
+}
 
 onMounted(async () => {
     await store.fetchBooks();
@@ -39,6 +61,12 @@ const filteredBooks = computed(() => {
     return store.books.filter((b) => b.readingStatus === filter.value);
 });
 
+// 列表模式按书名首字母（拼音）排序
+const sortedBooks = computed(() => {
+    if (viewMode.value !== 'list') return filteredBooks.value;
+    return [...filteredBooks.value].sort((a, b) => a.title.localeCompare(b.title, 'zh-CN'));
+});
+
 function openBook(book: Book) {
     router.push(`/reader/book/${book.id}`);
 }
@@ -47,11 +75,6 @@ async function handleDelete(book: Book, event: MouseEvent) {
     event.stopPropagation();
     if (!(await confirmAction(`确定删除《${book.title}》？`, '删除书籍'))) return;
     await store.removeBook(book.id);
-}
-
-function progressPercent(book: Book): number {
-    if (!book.totalPages || book.totalPages <= 0) return 0;
-    return Math.min(100, Math.round((book.currentPage / book.totalPages) * 100));
 }
 
 function formatIcon(format: string): string {
@@ -70,14 +93,6 @@ function statusLabel(book: Book): string {
         case 'finished': return '已读完';
         default: return '未读';
     }
-}
-
-function progressLabel(book: Book): string {
-    if (!book.totalPages || book.totalPages <= 0) return '未开始';
-    if (book.fileFormat === 'txt') {
-        return `第 ${book.currentPage} / ${book.totalPages} 章`;
-    }
-    return `${book.currentPage} / ${book.totalPages} 页`;
 }
 
 /**
@@ -219,6 +234,12 @@ async function handleImport() {
                     <option value="unread">未读</option>
                     <option value="finished">已读完</option>
                 </select>
+                <div class="view-toggle">
+                    <button class="toggle-btn" :class="{ active: viewMode === 'grid' }" title="网格视图"
+                        @click="setViewMode('grid')">▦</button>
+                    <button class="toggle-btn" :class="{ active: viewMode === 'list' }" title="列表视图"
+                        @click="setViewMode('list')">☰</button>
+                </div>
                 <button class="btn btn-primary" :disabled="importing" @click="handleImport">
                     {{ importing ? '导入中...' : '+ 导入书籍' }}
                 </button>
@@ -230,8 +251,8 @@ async function handleImport() {
             <div class="hint">点击右上角“导入书籍”开始</div>
         </div>
 
-        <div v-else class="book-grid">
-            <div v-for="book in filteredBooks" :key="book.id" class="book-card" @click="openBook(book)">
+        <div v-else-if="viewMode === 'grid'" class="book-grid">
+            <div v-for="book in sortedBooks" :key="book.id" class="book-card" @click="openBook(book)">
                 <div class="book-cover">
                     <img v-if="book.coverUrl" :src="book.coverUrl" :alt="book.title" />
                     <div v-else class="cover-placeholder">
@@ -245,18 +266,30 @@ async function handleImport() {
 
                 <div class="book-info">
                     <div class="book-title" :title="book.title">{{ book.title }}</div>
-                    <div class="book-author">{{ book.author || '未知作者' }}</div>
-
-                    <div v-if="book.totalPages > 0" class="progress-bar">
-                        <div class="progress-fill" :style="{ width: progressPercent(book) + '%' }"></div>
-                    </div>
-                    <div class="progress-text">
-                        {{ progressLabel(book) }}
-                        <template v-if="book.totalPages > 0"> · {{ progressPercent(book) }}%</template>
-                    </div>
 
                     <button class="btn btn-danger btn-icon" @click="handleDelete(book, $event)">删除</button>
                 </div>
+            </div>
+        </div>
+
+        <!-- 列表视图：按书名首字母排序 -->
+        <div v-else class="book-list">
+            <div class="book-list-header">
+                <span>书名</span>
+                <span>类型</span>
+                <span>状态</span>
+                <span class="col-actions">操作</span>
+            </div>
+            <div v-for="book in sortedBooks" :key="book.id" class="book-row" @click="openBook(book)">
+                <span class="book-title" :title="book.title">{{ book.title }}</span>
+                <span class="book-format">{{ book.fileFormat.toUpperCase() }}</span>
+                <span class="book-status">
+                    <span class="status-dot" :class="book.readingStatus"></span>
+                    {{ statusLabel(book) }}
+                </span>
+                <span class="col-actions">
+                    <button class="btn btn-danger btn-icon" @click="handleDelete(book, $event)">删除</button>
+                </span>
             </div>
         </div>
     </div>
@@ -299,6 +332,122 @@ async function handleImport() {
     font-size: 13px;
     cursor: pointer;
     outline: none;
+}
+
+.view-toggle {
+    display: flex;
+    border: 1px solid #d0d0d0;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.toggle-btn {
+    border: none;
+    background: #fff;
+    color: #666;
+    padding: 6px 10px;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.toggle-btn + .toggle-btn {
+    border-left: 1px solid #d0d0d0;
+}
+
+.toggle-btn:hover {
+    background: #f2f2f2;
+}
+
+.toggle-btn.active {
+    background: #2c3e50;
+    color: #fff;
+}
+
+/* 列表视图 */
+.book-list {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #fff;
+}
+
+.book-list-header,
+.book-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 90px 100px 80px;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+}
+
+.book-list-header {
+    background: #f7f7f7;
+    border-bottom: 1px solid #e0e0e0;
+    font-size: 12px;
+    font-weight: 600;
+    color: #666;
+}
+
+.book-row {
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 14px;
+    color: #333;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.book-row:last-child {
+    border-bottom: none;
+}
+
+.book-row:hover {
+    background: #f8fafc;
+}
+
+.book-format {
+    color: #888;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.book-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #666;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #bdbdbd;
+    flex-shrink: 0;
+}
+
+.status-dot.reading {
+    background: #2c3e50;
+}
+
+.status-dot.finished {
+    background: #27ae60;
+}
+
+.col-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+    .book-list-header,
+    .book-row {
+        grid-template-columns: minmax(0, 1fr) 60px 76px 64px;
+        gap: 8px;
+        padding: 10px;
+    }
 }
 
 .book-grid {
@@ -349,7 +498,7 @@ async function handleImport() {
 }
 
 .format-icon {
-    font-size: 48px;
+    font-size: 32px;
 }
 
 .format-label {
@@ -396,33 +545,6 @@ async function handleImport() {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-}
-
-.book-author {
-    font-size: 12px;
-    color: #888;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.progress-bar {
-    height: 3px;
-    background: #e0e0e0;
-    border-radius: 2px;
-    overflow: hidden;
-    margin-top: 6px;
-}
-
-.progress-fill {
-    height: 100%;
-    background: #2c3e50;
-    transition: width 0.3s;
-}
-
-.progress-text {
-    font-size: 11px;
-    color: #999;
 }
 
 .book-info .btn-danger {

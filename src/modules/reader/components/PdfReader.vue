@@ -180,29 +180,13 @@ async function zoomOut() {
     await renderCurrentPage();
 }
 
-// 监听键盘事件（左右翻页、+/- 缩放）
-function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
-        e.preventDefault();
-        prevPage();
-    } else if (e.key === 'ArrowRight' || e.key === 'PageDown') {
-        e.preventDefault();
-        nextPage();
-    } else if (e.key === '+' || e.key === '=') {
-        e.preventDefault();
-        zoomIn();
-    } else if (e.key === '-') {
-        e.preventDefault();
-        zoomOut();
-    }
-}
+// 键盘翻页和缩放统一由 BookReaderView 处理，避免重复触发
 
 onMounted(async () => {
     try {
         await nextTick();
         await load();
         loading.value = false;
-        window.addEventListener('keydown', handleKeydown);
     } catch (err) {
         logger.error('[PDF] 加载失败:', err);
         errorMsg.value = err instanceof Error ? err.message : String(err);
@@ -211,7 +195,6 @@ onMounted(async () => {
 });
 
 onUnmounted(async () => {
-    window.removeEventListener('keydown', handleKeydown);
     // 卸载时立即保存一次，避免防抖窗口内的翻页丢失
     await saveProgress();
     try {

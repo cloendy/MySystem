@@ -385,11 +385,6 @@ pub fn delete_annotation(
     Ok(())
 }
 
-#[tauri::command]
-pub fn read_book_file(file_path: String) -> Result<Vec<u8>, String> {
-    std::fs::read(&file_path).map_err(|e| format!("读取文件失败: {}", e))
-}
-
 use std::path::Path;
 
 #[derive(Debug, Serialize)]

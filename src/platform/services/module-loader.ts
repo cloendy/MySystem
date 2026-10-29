@@ -110,26 +110,3 @@ export function getLoadedModules(): ModuleInterface[] {
         (a, b) => (a.order ?? 0) - (b.order ?? 0)
     );
 }
-
-/**
- * 按 ID 获取模块
- */
-export function getModule(id: string): ModuleInterface | undefined {
-    return loadedModules.get(id);
-}
-
-/**
- * 卸载所有模块
- */
-export async function unloadAllModules(): Promise<void> {
-    if (loadedModules.size === 0) return;
-    for (const mod of loadedModules.values()) {
-        try {
-            await mod.onUnload?.();
-        } catch (err) {
-            logger.error(`[ModuleLoader] 模块 ${mod.id} 卸载失败:`, err);
-        }
-    }
-    logger.info(`[ModuleLoader] 已卸载模块: ${Array.from(loadedModules.keys()).join(', ')}`);
-    loadedModules.clear();
-}

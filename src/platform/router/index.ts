@@ -14,11 +14,6 @@ export function createAppRouter(): Router {
         history: createWebHashHistory(),
         routes: [
             {
-                path: '/',
-                name: 'home',
-                component: () => import('../shell/HomeView.vue'),
-            },
-            {
                 path: '/settings',
                 name: 'settings',
                 component: () => import('../shell/SettingsView.vue'),
@@ -65,5 +60,15 @@ export function registerModuleRoutes(modules: ModuleInterface[]): void {
             });
             logger.info(`[Router] 注册路由: ${fullPath} (${mod.id})`);
         }
+    }
+
+    // 不再提供独立首页，根路径直接跳转到第一个可用模块
+    if (modules.length > 0) {
+        const firstModulePath = `/${modules[0].id}/`;
+        r.addRoute({
+            path: '/',
+            redirect: firstModulePath,
+        });
+        logger.info(`[Router] 根路径重定向: / -> ${firstModulePath}`);
     }
 }

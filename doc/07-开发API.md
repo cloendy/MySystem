@@ -18,37 +18,23 @@ const notes = await invoke<Note[]>('list_notes', { folderId: null });
 - 业务模块不直接 `invoke`，而是通过自己的 `api.ts` 封装，并自动注入 `getDeviceId()`。
 - 新增命令必须加入 `commands.rs` 的 `invoke_handler()`，否则报 “command not found”。
 
-## 7.2 命令总览（43 个）
+## 7.2 命令总览（35 个）
 
-### 平台：路径与日志（5）
+### 平台：日志（4）
 
 | 命令 | 参数 | 返回 |
 |---|---|---|
-| `get_data_dir` | 无 | `string` |
 | `write_log` | `{ level, message }` | 无 |
 | `list_log_files` | 无 | `LogFileInfo[]` |
 | `read_log_file` | `{ name }` | `string` |
 | `get_log_dir` | 无 | `string` |
 
-### 平台：文档基础 CRUD（5）
-
-| 命令 | 参数 | 返回 |
-|---|---|---|
-| `create_document` | `{ input: { type, title, deviceId } }` | `BaseDocument` |
-| `get_document` | `{ id }` | `BaseDocument \| null` |
-| `list_documents` | `{ type?: string }` | `BaseDocument[]` |
-| `update_document` | `{ input: { id, title?, deviceId } }` | `BaseDocument` |
-| `delete_document` | `{ id, deviceId }` | 无 |
-
-> 目前未被业务代码使用；模块都使用自己的命令。
-
-### 平台：配置（3）
+### 平台：配置（2）
 
 | 命令 | 参数 | 返回 |
 |---|---|---|
 | `get_config` | `{ key }` | `string \| null` |
 | `set_config` | `{ key, value }` | 无 |
-| `delete_config` | `{ key }` | 无 |
 
 ### 平台：发现与同步（9）
 
@@ -84,7 +70,7 @@ const notes = await invoke<Note[]>('list_notes', { folderId: null });
 | `update_folder` | `{ input: { id, name } }` | `Folder` |
 | `delete_folder` | `{ id }` | 无 |
 
-### 阅读器（11）
+### 阅读器（10）
 
 | 命令 | 参数 | 返回 |
 |---|---|---|
@@ -96,15 +82,10 @@ const notes = await invoke<Note[]>('list_notes', { folderId: null });
 | `create_annotation` | `{ input: CreateAnnotationInput & { deviceId } }` | `Annotation` |
 | `list_annotations` | `{ bookId }` | `Annotation[]` |
 | `delete_annotation` | `{ id, deviceId }` | 无 |
-| `read_book_file` | `{ filePath }` | `number[]`（字节数组） |
 | `import_book_file` | `{ sourcePath }` | `{ filePath, fileFormat, title }` |
 | `delete_book_file` | `{ filePath }` | 无 |
 
 ## 7.3 平台命令详情
-
-### `get_data_dir`
-
-返回 `<data>` 的绝对路径，并确保目录存在。
 
 ### 日志
 
@@ -122,7 +103,7 @@ interface LogFileInfo {
 
 ### 配置
 
-`get_config` 不存在时返回 `null`；`set_config` 使用 upsert；`delete_config` 幂等。
+`get_config` 不存在时返回 `null`；`set_config` 使用 upsert。
 
 ### 发现
 
@@ -279,10 +260,6 @@ exchange_sync_data(ipAddress, payload): Promise<SyncResponse>    // 30s 超时
 
 软删除，不检查是否已删除。
 
-### `read_book_file`
-
-直接读取任意路径文件并返回字节数组。前端封装为 `Uint8Array`。注意这是同步命令，读取大文件会阻塞 IPC。
-
 ### `import_book_file`
 
 - 校验源文件存在、扩展名属于 `epub/pdf/mobi/txt`；
@@ -429,7 +406,6 @@ deleteBook(id)             // 注入 deviceId
 createAnnotation(input)    // 注入 deviceId
 listAnnotations(bookId)
 deleteAnnotation(id)       // 注入 deviceId
-readBookFile(filePath)     // number[] → Uint8Array
 importBookFile(sourcePath)
 deleteBookFile(filePath)
 ```
@@ -437,7 +413,7 @@ deleteBookFile(filePath)
 ### 平台 `src/platform/services/config.ts`
 
 ```ts
-getConfig / setConfig / deleteConfig
+getConfig / setConfig
 getSyncReceiveEnabled / setSyncReceiveEnabled
 getDeviceName / setDeviceName
 startDiscoveryListener / stopDiscoveryListener

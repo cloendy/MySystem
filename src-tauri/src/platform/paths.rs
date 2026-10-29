@@ -100,9 +100,3 @@ fn is_writable(dir: &Path) -> bool {
     }
     ok
 }
-
-/// 前端使用：返回数据目录的绝对路径。
-#[tauri::command]
-pub fn get_data_dir(app: tauri::AppHandle) -> Result<String, String> {
-    Ok(data_dir(&app)?.to_string_lossy().to_string())
-}

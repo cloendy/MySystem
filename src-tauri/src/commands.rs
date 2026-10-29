@@ -6,22 +6,14 @@ use tauri::ipc::Invoke;
 /// 否则前端 invoke 会报 “command not found”。
 pub fn invoke_handler() -> impl Fn(Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
-        // 平台：路径与日志
-        crate::platform::paths::get_data_dir,
+        // 平台：日志
         crate::platform::logger::write_log,
         crate::platform::logger::list_log_files,
         crate::platform::logger::read_log_file,
         crate::platform::logger::get_log_dir,
-        // 平台：文档基础 CRUD
-        crate::platform::storage::create_document,
-        crate::platform::storage::get_document,
-        crate::platform::storage::list_documents,
-        crate::platform::storage::update_document,
-        crate::platform::storage::delete_document,
         // 平台：配置
         crate::platform::config_storage::get_config,
         crate::platform::config_storage::set_config,
-        crate::platform::config_storage::delete_config,
         // 平台：局域网发现与同步
         crate::platform::discovery::start_discovery_listener,
         crate::platform::discovery::stop_discovery_listener,
@@ -52,7 +44,6 @@ pub fn invoke_handler() -> impl Fn(Invoke<tauri::Wry>) -> bool + Send + Sync + '
         crate::modules::reader::create_annotation,
         crate::modules::reader::list_annotations,
         crate::modules::reader::delete_annotation,
-        crate::modules::reader::read_book_file,
         crate::modules::reader::import_book_file,
         crate::modules::reader::delete_book_file,
     ]

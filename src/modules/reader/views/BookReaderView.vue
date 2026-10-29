@@ -1,7 +1,7 @@
 <script setup lang="ts">
 
 import { logger } from '../../../platform/services/logger'
-import { onMounted, onUnmounted, ref, computed } from 'vue';
+import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useReaderStore } from '../stores/reader';
 import EpubReader from '../components/EpubReader.vue';
@@ -21,16 +21,19 @@ const annotationVisible = ref(false);
 const epubRef = ref<InstanceType<typeof EpubReader> | null>(null);
 const pdfRef = ref<InstanceType<typeof PdfReader> | null>(null);
 const txtRef = ref<InstanceType<typeof TxtReader> | null>(null);
+const tocPanelEl = ref<HTMLElement | null>(null);
 
 const jumpInput = ref('');
 
 const fileFormat = computed(() => store.currentBook?.fileFormat ?? '');
 const toc = computed(() => epubRef.value?.toc ?? []);
+const tocActiveIndex = computed(() => epubRef.value?.currentTocIndex ?? -1);
 const currentChapter = computed(() => epubRef.value?.currentChapter ?? '');
 const pdfPageCount = computed(() => pdfRef.value?.pageCount ?? 0);
 const pdfCurrentPage = computed(() => pdfRef.value?.currentPage ?? 0);
 const txtTotalChapters = computed(() => txtRef.value?.totalChapters ?? 0);
 const txtCurrentIndex = computed(() => txtRef.value?.currentIndex ?? 0);
+const txtPageMode = computed(() => txtRef.value?.pageMode ?? 'page');
 
 function goBack() {
     router.push('/reader/');
@@ -39,13 +42,13 @@ function goBack() {
 function prevPage() {
     if (fileFormat.value === 'epub') epubRef.value?.prevPage();
     else if (fileFormat.value === 'pdf') pdfRef.value?.prevPage();
-    else if (fileFormat.value === 'txt') txtRef.value?.prevChapter();
+    else if (fileFormat.value === 'txt') txtRef.value?.prevPage();
 }
 
 function nextPage() {
     if (fileFormat.value === 'epub') epubRef.value?.nextPage();
     else if (fileFormat.value === 'pdf') pdfRef.value?.nextPage();
-    else if (fileFormat.value === 'txt') txtRef.value?.nextChapter();
+    else if (fileFormat.value === 'txt') txtRef.value?.nextPage();
 }
 
 function handleTocClick(href: string) {
@@ -75,9 +78,59 @@ function handleAnnotationRemove(cfi: string) {
 }
 
 function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'ArrowLeft') prevPage();
-    else if (e.key === 'ArrowRight') nextPage();
+    // 输入框 / 可编辑区域内不拦截按键
+    const target = e.target as HTMLElement | null;
+    if (target && (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+    )) {
+        return;
+    }
+
+    if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault();
+        prevPage();
+    } else if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+        e.preventDefault();
+        nextPage();
+    } else if (fileFormat.value === 'pdf' && (e.key === '+' || e.key === '=')) {
+        e.preventDefault();
+        pdfRef.value?.zoomIn();
+    } else if (fileFormat.value === 'pdf' && e.key === '-') {
+        e.preventDefault();
+        pdfRef.value?.zoomOut();
+    }
 }
+
+/** 打开目录时把当前章节滚动到面板垂直中心 */
+function centerActiveToc() {
+    const panel = tocPanelEl.value;
+    if (!panel) return;
+    const active = panel.querySelector<HTMLElement>('.toc-item.active');
+    if (!active) return;
+
+    const panelRect = panel.getBoundingClientRect();
+    const itemRect = active.getBoundingClientRect();
+    panel.scrollTop +=
+        itemRect.top - panelRect.top - panelRect.height / 2 + itemRect.height / 2;
+}
+
+watch(tocVisible, async (visible) => {
+    if (!visible) return;
+    await nextTick();
+    centerActiveToc();
+});
+
+// 目录异步加载完成后再定位一次
+watch(
+    () => toc.value.length,
+    async () => {
+        if (!tocVisible.value) return;
+        await nextTick();
+        centerActiveToc();
+    },
+);
 
 onMounted(async () => {
     try {
@@ -131,6 +184,10 @@ onUnmounted(async () => {
             <button v-if="fileFormat === 'txt'" class="btn" @click="txtRef?.toggleChapterList()">
                 目录
             </button>
+            <button v-if="fileFormat === 'txt'" class="btn" :title="`当前：${txtPageMode === 'scroll' ? '滚动模式' : '翻页模式'}，点击切换`"
+                @click="txtRef?.togglePageMode()">
+                {{ txtPageMode === 'scroll' ? '📜 滚动' : '📄 翻页' }}
+            </button>
 
             <span class="book-title">{{ store.currentBook?.title }}</span>
 
@@ -162,12 +219,13 @@ onUnmounted(async () => {
         </div>
 
         <div class="reader-body">
-            <aside v-if="tocVisible && fileFormat === 'epub'" class="side-panel toc-panel">
+            <aside v-if="tocVisible && fileFormat === 'epub'" ref="tocPanelEl" class="side-panel toc-panel">
                 <div class="side-panel-header">
                     <span>目录</span>
                 </div>
                 <ul class="toc-list">
                     <li v-for="(item, idx) in toc" :key="idx" class="toc-item"
+                        :class="{ active: idx === tocActiveIndex }"
                         :style="{ paddingLeft: `${12 + item.level * 12}px` }" @click="handleTocClick(item.href)">
                         {{ item.label }}
                     </li>
@@ -252,6 +310,12 @@ onUnmounted(async () => {
 .toc-item:hover {
     background: #ececec;
     color: #2c3e50;
+}
+
+.toc-item.active {
+    background: #e0e8f0;
+    color: #2c3e50;
+    font-weight: 500;
 }
 
 .reader-main {

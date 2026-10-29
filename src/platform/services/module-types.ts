@@ -24,7 +24,7 @@ export interface ModuleInterface {
     name: string;
     version: string;
 
-    /** 模块图标（emoji 或字符），用于导航与首页 */
+    /** 模块图标（emoji 或字符），用于导航 */
     icon?: string;
 
     /** 加载与导航排序，数字小的排在前面，默认 0 */

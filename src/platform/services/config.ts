@@ -8,14 +8,9 @@ export async function setConfig(key: string, value: string): Promise<void> {
     await invoke('set_config', { key, value });
 }
 
-export async function deleteConfig(key: string): Promise<void> {
-    await invoke('delete_config', { key });
-}
-
 // ============ 同步相关配置键 ============
 export const CONFIG_KEYS = {
     SYNC_RECEIVE_ENABLED: 'sync.receive.enabled',
-    SYNC_PORT: 'sync.port',
     DEVICE_NAME: 'device.name',
 } as const;
 
@@ -141,15 +136,6 @@ export async function exchangeSyncData(
 ): Promise<SyncResponse> {
     return await invoke<SyncResponse>('exchange_sync_data', { ipAddress, payload });
 }
-
-// export async function applySyncResponse(response: SyncResponse): Promise<void> {
-//     // 用返回的 payload 再次合并到本地
-//     // 复用 exchange_sync_data 逻辑的合并部分：通过再次调用 merge 命令
-//     // 简化方案：把 serverPayload 当作从对方收到的数据，直接走一次本地合并
-//     // 这里直接调用 Rust 命令：把 serverPayload 推给"自己"是不行的
-//     // 更好的方式：新增一个 merge_local_payload 命令，见第 11 小步
-//     throw new Error('Not implemented, see step 11');
-// }
 
 export async function applyLocalPayload(
     payload: SyncPayload,
