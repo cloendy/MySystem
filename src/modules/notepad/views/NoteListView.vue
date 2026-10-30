@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, computed, ref, watch } from 'vue';
+import { onMounted, computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useNotepadStore } from '../stores/notepad';
 import FolderTree from '../components/FolderTree.vue';
@@ -37,17 +37,7 @@ onMounted(async () => {
         // 移动菜单需要文件夹列表；移动端没有 FolderTree，也在这里加载
         store.fetchFolders(),
     ]);
-    window.addEventListener('mysystem:sync-completed', handleSyncCompleted);
 });
-
-onUnmounted(() => {
-    window.removeEventListener('mysystem:sync-completed', handleSyncCompleted);
-});
-
-async function handleSyncCompleted() {
-    await store.fetchNotes(store.currentFolderId);
-    await store.fetchFolders();
-}
 
 async function handleCreate() {
     const note = await store.addNote({

@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-个人跨平台系统（MySystem）：基于 **Tauri 2 + Vue 3 + TypeScript + Vite** 的桌面/移动应用，目标是同一套代码运行在 Windows（PC 主机）和 Android（客户端），数据通过局域网同步（PC 为主机，无中心服务器）。
+个人跨平台系统（MySystem）：基于 **Tauri 2 + Vue 3 + TypeScript + Vite** 的桌面/移动应用，目标是同一套代码运行在 Windows（PC 主机）和 Android（客户端）。局域网同步功能已整体移除，当前为各设备独立使用本地数据。
 
-**`doc/` 下的 01~12 号文档是当前系统的参考文档**（索引见 `doc/README.md`）——涉及架构、数据结构、同步方案时先查阅这些文档与 `doc/11-已知偏差与路线图.md`。文档以当前代码实现为准；原始设计文档 `personal-system-design-v2.md` 已归档到 `doc/backup/_2026102201/`，不再作为参考。改代码时以实际代码为准并在必要时同步修正文档。
+**`doc/` 下的 01~12 号文档是当前系统的参考文档**（索引见 `doc/README.md`）——涉及架构、数据结构时先查阅这些文档与 `doc/11-已知偏差与路线图.md`。文档以当前代码实现为准；原始设计文档 `personal-system-design-v2.md` 已归档到 `doc/backup/_2026102201/`，不再作为参考。改代码时以实际代码为准并在必要时同步修正文档。
 
 完整项目文档位于 `doc/`，索引见 `doc/README.md`：系统架构、功能设计、UI、数据库、数据结构、开发 API、开发指南、部署配置、测试排错等。
 
-当前已实现四个模块：**记事本**（Markdown / 纯文本编辑、嵌套文件夹、标签、置顶、搜索）、**阅读器**（EPUB/PDF/TXT 阅读、目录、标注高亮、阅读进度）、**JSON 分析**（导入文件或粘贴文本，展示结构与统计）和 **角色图鉴**（读取 `data/其他/ys.json`，列表展示、快捷筛选与自定义条件）；设置页已接入局域网设备发现与手动同步。
+当前已实现四个模块：**记事本**（Markdown / 纯文本编辑、嵌套文件夹、标签、置顶、搜索）、**阅读器**（EPUB/PDF/TXT 阅读、目录、标注高亮、阅读进度）、**JSON 分析**（导入文件或粘贴文本，展示结构与统计）和 **角色图鉴**（读取 `data/其他/ys.json`，列表展示、快捷筛选与自定义条件）。
 
 ## 常用命令
 
@@ -31,14 +31,14 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
 ### 平台/模块（platform/modules）分层
 
 - `src/platform/` — 平台外壳与基础服务，模块代码**不应反向依赖具体业务**：
-  - `shell/` — `AppShell.vue`（Windows 端：顶栏 + 侧边导航 + 内容区）、`MobileShell.vue`（Android 端：顶栏 + 底部 Tab）、`SettingsView.vue`（设置页骨架；同步开关/设备扫描/连接同步/日志查看拆到 `settings/components/`，共享状态在 `settings/useSyncSettings.ts`）
+  - `shell/` — `AppShell.vue`（Windows 端：顶栏 + 侧边导航 + 内容区）、`MobileShell.vue`（Android 端：顶栏 + 底部 Tab）、`SettingsView.vue`（设置页骨架；日志查看拆到 `settings/components/LogViewer.vue`）
   - `services/logger.ts` — 平台统一日志入口：`logger.info/warn/error/debug` 写入 Rust 日志服务，另提供 `listLogFiles`/`readLogFile`/`getLogDir` 供设置页查看日志
   - `services/module-loader.ts` — 模块加载核心：用 `import.meta.glob('../../modules/*/index.ts')` 自动发现 `src/modules/` 下的模块入口，从模块实例读取 `id`/`name`/`version`/`icon`/`order`/`enabled` 后加载（没有注册表文件）
   - `services/module-types.ts` — 核心契约 `ModuleInterface`（`id`/`name`/`version`/`onLoad`/`getRoutes`/`onSearch`，以及可选的 `icon`/`order`/`enabled`）和 `ModuleContext`（目前只注入 `platform` 与 `events`）
   - `services/event-bus.ts` — 简易事件总线，作为 `ModuleContext.events`
   - `router/index.ts` — 全局单例 vue-router（hash 模式）；`registerModuleRoutes()` 把模块路由统一加上 `/{moduleId}` 前缀注册，路由名加 `moduleId:` 前缀
   - `services/device.ts` — `getDeviceId()` 用 localStorage 键 `mysystem_device_id` 持久化设备 ID（UUID v4），各模块 API 与设置页从这里取设备 ID
-  - `services/config.ts` — 配置读写 + 设备发现 + 同步 HTTP 客户端的前端 invoke 封装（`getConfig`/`setConfig`、`startDiscoveryListener`/`scanDevices`、`startSyncServer`、`checkRemoteDevice`/`exchangeSyncData`/`getSyncPayload`/`applyLocalPayload`）
+  - `services/config.ts` — `app_config` 键值配置的前端 invoke 封装（`getConfig`/`setConfig`）
 - `src/modules/<id>/` — 功能模块（现有 `notepad`、`reader`、`jsonview`、`ys`），模块自包含：
   1. 提供 `index.ts` 默认导出实现 `ModuleInterface`，在实例上声明元数据（`id` 必填；`icon`/`order`/`enabled` 可选，`enabled` 未声明的平台默认启用）
   2. 视图放在模块自己的 `views/` 下
@@ -70,10 +70,6 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
   | `database_init.rs` | 启动时在统一数据库中创建全部业务表 |
   | `logger.rs` | 平台日志服务：写 `<data>/log/mysystem-YYYY-MM-DD.log`，提供 `log_*!` 宏与日志查看命令 |
   | `config_storage.rs` | `app_config` 键值配置的 get/set |
-  | `discovery.rs` | UDP 局域网设备发现（端口 54321，magic `MYSYSTEM_V1`，`discover`/`announce`） |
-  | `http_server.rs` | 基于 `tiny_http` 的同步服务端（端口 54322）：`GET /api/info`、`POST /api/sync/exchange` |
-  | `http_client.rs` | 基于 `reqwest` 的客户端：握手与数据交换 |
-  | `sync_payload.rs` | `SyncPayload`/`SyncResponse` 定义；当前 `documents`/`notes` 均为空数组（全部业务数据暂停同步），合并时忽略收到的数据 |
 
 - Rust 模型使用 `#[serde(rename_all = "camelCase")]`；前端对应类型在各模块 `types.ts`。注意 `Note.tags` 在 Rust 是 `Vec<String>`、数据库存 JSON 字符串，模块 API 返回给前端时已是数组。
 
@@ -98,17 +94,15 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
 - **Rust 端**：`platform/logger.rs` 是唯一日志出口，初始化后写入 `<data>/log/mysystem-YYYY-MM-DD.log`（按天分文件），同时输出到终端。业务代码统一使用 `crate::log_info!` / `log_warn!` / `log_error!` / `log_debug!`，不要再使用 `println!`/`eprintln!`。
 - **前端与模块**：统一使用 `src/platform/services/logger.ts` 的 `logger.info/warn/error/debug`（底层 invoke `write_log`），模块可以直接引用，不需要经过 `ModuleContext`。业务代码不要直接调用 `console.*`。
 - **自动日志**：`platform/services/ui-logging.ts` 在 `main.ts` 中安装，通过捕获阶段点击委托自动记录按钮/链接点击（`[UI] 点击「...」 @ 路由`，同一路由同一标签 300ms 内去重；给元素加 `data-log-ignore` 可跳过）。页面切换由 `platform/router/index.ts` 的 `router.afterEach` 自动记录（`[Router] 页面切换: A -> B`）。
-- **业务日志**：集中在各模块 store（新建/删除/重命名/标签/搜索、打开书籍/标注等）和同步流程（`settings/useSyncSettings.ts` 的同步日志会同时写入系统日志）；高频操作做节流（搜索 1s、笔记自动保存 5s），不要逐字符或逐页码写日志。
+- **业务日志**：集中在各模块 store（新建/删除/重命名/标签/搜索、打开书籍/标注等）；高频操作做节流（搜索 1s、笔记自动保存 5s），不要逐字符或逐页码写日志。
 - **查看**：设置页“系统日志 → 查看日志”打开覆盖式日志面板（文件选择、级别筛选、刷新、日志目录展示）。后端命令为 `write_log`、`list_log_files`、`read_log_file`（单文件最多读取最后 512 KB）、`get_log_dir`。
 - 日志目录初始化失败不应阻塞启动；初始化前只输出到终端。
 
-### 局域网同步（现状）
+### 局域网同步（已移除）
 
-- **发现**：UDP 54321 广播 `discover` 消息，监听方回复 `announce`；设备 ID/名称/平台随消息携带。
-- **交换**：HTTP 54322，`GET /api/info` 握手，`POST /api/sync/exchange` 交换数据。
-- **流程**（设置页手动触发）：本机 `get_sync_payload` 读出全量 → `exchange_sync_data` 发给对方 → 对方 `merge_payload` 并按 `updated_at` 合并（新覆盖旧，相等或本地更新则拒绝）→ 对方返回自己的全量 `server_payload` → 本机 `apply_local_payload` 再合并一次。
-- **范围**：payload 的 `documents` 与 `notes` 均为空数组——笔记（`Note_Content`）、文件夹、书籍（`Read_Books`）、标注（`Read_Annotation`）全部暂停同步（各设备独立自增编号）；合并时收到的数据只计入 `rejected`。目前是全量交换，未使用 `sync_operations` 增量日志。
-- 端口目前硬编码（54321/54322）。同步相关配置存在 `app_config`：`sync.receive.enabled`、`device.name`。
+- 原 UDP 设备发现、HTTP 同步服务端/客户端、`SyncPayload` 全量交换与设置页同步界面均已删除（2026-10-30）。
+- 同步相关的 Rust 文件 `platform/discovery.rs`、`http_server.rs`、`http_client.rs`、`sync_payload.rs` 及 `tiny_http`/`reqwest` 依赖已移除；`sync_operations` 表不再创建、也不再写入。
+- 设备 ID（`getDeviceId()`）保留，仅用于各业务表 `Device_ID` 字段。`app_config` 与 `config_storage` 作为通用配置能力保留。
 - 全局搜索尚未接入：`ModuleInterface.onSearch` 已定义，但 `AppShell` 的搜索框仍是 disabled。
 
 ### Tauri 配置要点
@@ -133,7 +127,6 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
 以下是当前实现与已归档的 `personal-system-design-v2.md` 之间的差异，仅用于追溯设计意图。改动前请知悉，必要时先与用户确认是修实现还是改文档：
 
 - 设计文档要求 UUID v7（时间有序），实际使用 `uuid::Uuid::new_v4()`
-- 设计文档描述操作日志增量同步，实际为全量 payload 交换；`sync_operations` 只写不读
-- 同步未覆盖笔记、文件夹、书籍、标注（笔记因 `Note_ID` 各设备独立自增，本次明确暂停）
+- 设计文档中的局域网同步方案未实现，同步子系统已移除（2026-10-30）
 - 数据库路径已统一到 `<应用根>/data/mydata.db`（见上“统一 data 目录”）
 - 设计文档要求用 `public/modules.json` 注册模块（含 `entryPoint`/`enabled`），实际改为 `src/modules/` 自动发现；模块元数据（`icon`/`order`/`enabled`）由 `ModuleInterface` 实例声明

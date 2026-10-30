@@ -2,7 +2,6 @@ pub mod folders;
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 /// 笔记标题最大长度（字符数），与 `Note_Content.Note_Title VARCHAR(20)` 对应。
 pub const MAX_NOTE_TITLE_LEN: usize = 20;
@@ -265,24 +264,6 @@ fn migrate_legacy_notes(conn: &mut Connection) -> Result<(), String> {
     Ok(())
 }
 
-fn log_sync_op(
-    conn: &Connection,
-    note_id: &str,
-    operation: &str,
-    field: &str,
-    value: &str,
-    device_id: &str,
-) -> Result<(), String> {
-    let id = Uuid::new_v4().to_string();
-    conn.execute(
-        "INSERT INTO sync_operations (id, document_id, operation, field, value, timestamp, device_id, synced)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
-        params![id, note_id, operation, field, value, now_ms(), device_id],
-    )
-    .map_err(|e| format!("写入同步日志失败: {}", e))?;
-    Ok(())
-}
-
 fn row_to_note(row: &rusqlite::Row) -> rusqlite::Result<Note> {
     let tags_json: String = row.get(3)?;
     let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
@@ -370,8 +351,6 @@ pub fn create_note(app: tauri::AppHandle, input: CreateNoteInput) -> Result<Note
         ],
     )
     .map_err(|e| format!("插入笔记失败: {}", e))?;
-
-    log_sync_op(&tx, &note_id, "create", "title", &input.title, &input.device_id)?;
 
     tx.commit().map_err(|e| e.to_string())?;
 
@@ -511,7 +490,6 @@ pub fn update_note(app: tauri::AppHandle, input: UpdateNoteInput) -> Result<Note
         .map_err(|e| e.to_string())?;
     }
 
-    log_sync_op(&tx, &input.id, "update", "", "", &input.device_id)?;
     tx.commit().map_err(|e| e.to_string())?;
 
     let note = get_note(app, input.id)?.ok_or_else(|| "笔记不存在".to_string())?;
@@ -537,7 +515,6 @@ pub fn delete_note(app: tauri::AppHandle, id: String, device_id: String) -> Resu
         return Err("笔记不存在或已删除".to_string());
     }
 
-    log_sync_op(&tx, &id, "delete", "", "", &device_id)?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }

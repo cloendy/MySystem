@@ -14,16 +14,6 @@ pub fn invoke_handler() -> impl Fn(Invoke<tauri::Wry>) -> bool + Send + Sync + '
         // 平台：配置
         crate::platform::config_storage::get_config,
         crate::platform::config_storage::set_config,
-        // 平台：局域网发现与同步
-        crate::platform::discovery::start_discovery_listener,
-        crate::platform::discovery::stop_discovery_listener,
-        crate::platform::discovery::scan_devices,
-        crate::platform::http_server::start_sync_server,
-        crate::platform::http_server::stop_sync_server,
-        crate::platform::http_client::check_remote_device,
-        crate::platform::http_client::exchange_sync_data,
-        crate::platform::sync_payload::get_sync_payload,
-        crate::platform::sync_payload::apply_local_payload,
         // 记事本模块
         crate::modules::notepad::create_note,
         crate::modules::notepad::get_note,

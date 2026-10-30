@@ -1,6 +1,6 @@
 # 07 开发 API
 
-本章列出前端可调用的全部 Tauri 命令、局域网 HTTP/UDP 协议、模块封装与事件接口。命令实现分散在 Rust 各模块，但统一在 `src-tauri/src/commands.rs` 注册。
+本章列出前端可调用的全部 Tauri 命令、模块封装与事件接口。命令实现分散在 Rust 各模块，但统一在 `src-tauri/src/commands.rs` 注册。
 
 ## 7.1 调用约定
 
@@ -18,7 +18,7 @@ const notes = await invoke<Note[]>('list_notes', { folderId: null });
 - 业务模块不直接 `invoke`，而是通过自己的 `api.ts` 封装，并自动注入 `getDeviceId()`。
 - 新增命令必须加入 `commands.rs` 的 `invoke_handler()`，否则报 “command not found”。
 
-## 7.2 命令总览（37 个）
+## 7.2 命令总览（28 个）
 
 ### 平台：日志（4）
 
@@ -35,20 +35,6 @@ const notes = await invoke<Note[]>('list_notes', { folderId: null });
 |---|---|---|
 | `get_config` | `{ key }` | `string \| null` |
 | `set_config` | `{ key, value }` | 无 |
-
-### 平台：发现与同步（9）
-
-| 命令 | 参数 | 返回 |
-|---|---|---|
-| `start_discovery_listener` | `{ deviceId, deviceName, platform }` | 无 |
-| `stop_discovery_listener` | 无 | 无 |
-| `scan_devices` | `{ timeoutMs?: number, selfDeviceId }` | `DeviceInfo[]` |
-| `start_sync_server` | `{ deviceId, deviceName, platform }` | 无 |
-| `stop_sync_server` | 无 | 无 |
-| `check_remote_device` | `{ ipAddress }` | `RemoteDeviceInfo` |
-| `exchange_sync_data` | `{ ipAddress, payload: SyncPayload }` | `SyncResponse` |
-| `get_sync_payload` | `{ deviceId, deviceName }` | `SyncPayload` |
-| `apply_local_payload` | `{ payload: SyncPayload }` | `[accepted, rejected, merged]` |
 
 ### 记事本：笔记（6）
 
@@ -117,34 +103,6 @@ interface LogFileInfo {
 
 `get_config` 不存在时返回 `null`；`set_config` 使用 upsert。
 
-### 发现
-
-```ts
-interface DeviceInfo {
-    deviceId: string;
-    deviceName: string;
-    platform: string;   // 'windows' | 'android'
-    ipAddress: string;  // 来源 IP
-}
-```
-
-- `start_discovery_listener`：绑定 `0.0.0.0:54321`，收到 `discover` 后回复 `announce`；重复调用直接返回。
-- `stop_discovery_listener`：设置停止标志，线程最多 500ms 后退出。
-- `scan_devices(timeoutMs = 2000, selfDeviceId)`：广播两次 `discover`，在超时内收集 `announce`，过滤自己和重复设备。
-
-### 同步
-
-```ts
-get_sync_payload(deviceId, deviceName): Promise<SyncPayload>
-apply_local_payload(payload): Promise<[number, number, number]>  // accepted, rejected, merged
-check_remote_device(ipAddress): Promise<RemoteDeviceInfo>        // 3s 超时
-exchange_sync_data(ipAddress, payload): Promise<SyncResponse>    // 30s 超时
-```
-
-- `start_sync_server`：在 `0.0.0.0:54322` 启动 tiny_http 服务；重复调用直接返回。
-- `stop_sync_server`：发送停止信号并释放服务。
-- `apply_local_payload` 返回数组顺序是 `(accepted, rejected, merged)`，与 `SyncResponse` 的字段顺序不同，使用时注意。
-
 ## 7.4 记事本命令详情
 
 ### `create_note`
@@ -163,7 +121,7 @@ exchange_sync_data(ipAddress, payload): Promise<SyncResponse>    // 30s 超时
 
 - `folderId` 省略或为 `null` 时，后端自动设为 `0001`（未命名）；传入不存在的文件夹返回「文件夹不存在」。
 - `title` 超过 20 个字符时返回「笔记标题不能超过 20 个字符」。
-- 写入 `Note_Content`（`Note_ID` 取 `MAX+1` 补零到十位，`Version = 1`，`Device_ID` 取输入设备，并按目标文件夹解析 `Is_Folder` + `Folder1~3`），同时写一条 `sync_operations(create)`，`document_id` 使用 `Note_ID`。
+- 写入 `Note_Content`（`Note_ID` 取 `MAX+1` 补零到十位，`Version = 1`，`Device_ID` 取输入设备，并按目标文件夹解析 `Is_Folder` + `Folder1~3`）。
 - 返回完整 `Note`。
 
 ### `list_notes`
@@ -263,8 +221,7 @@ exchange_sync_data(ipAddress, payload): Promise<SyncResponse>    // 30s 超时
 ### `create_annotation`
 
 - 写入 `Read_Annotation`（`Annotation_ID` 取 `MAX+1` 补零到十位）；
-- `bookId` 直接存书籍编号；`note` 默认 `''`，`position` 默认 `'{}'`，`color` 默认 `#FFEB3B`；
-- 同时写 `sync_operations(create)`。
+- `bookId` 直接存书籍编号；`note` 默认 `''`，`position` 默认 `'{}'`，`color` 默认 `#FFEB3B`。
 
 ### `list_annotations`
 
@@ -309,100 +266,7 @@ exchange_sync_data(ipAddress, payload): Promise<SyncResponse>    // 30s 超时
 - 文件大小上限 20 MB，按 UTF-8 读取并去掉开头 BOM；
 - 返回 `{ path, content, size }`；解析、归一化与筛选都在前端完成，不写数据库。
 
-## 7.8 局域网协议
-
-### UDP 发现（端口 54321）
-
-广播地址：`255.255.255.255:54321`，JSON，单包最大 2048 字节。
-
-`discover`（扫描方 → 广播）：
-
-```json
-{
-  "magic": "MYSYSTEM_V1",
-  "msgType": "discover",
-  "deviceId": "<本机 id>",
-  "deviceName": null,
-  "platform": null,
-  "replyPort": 54321
-}
-```
-
-`replyPort` 是扫描方临时 UDP 套接字的本地端口，应答直接发往 `源 IP:replyPort`。
-
-`announce`（监听方 → 扫描方）：
-
-```json
-{
-  "magic": "MYSYSTEM_V1",
-  "msgType": "announce",
-  "deviceId": "<设备 id>",
-  "deviceName": "我的电脑",
-  "platform": "windows",
-  "replyPort": null
-}
-```
-
-规则：
-
-- `magic` 或 `msgType` 不匹配忽略；
-- 监听方忽略自己发出的 `discover`；
-- 扫描方忽略自己、按 `deviceId` 去重；
-- 广播发送两次，间隔 50ms；
-- 监听读超时 500ms，扫描读超时 200ms。
-
-### HTTP 同步（端口 54322）
-
-#### `GET /api/info`
-
-响应 200：
-
-```json
-{
-  "deviceId": "uuid",
-  "deviceName": "我的电脑",
-  "platform": "windows",
-  "protocolVersion": 1
-}
-```
-
-#### `POST /api/sync/exchange`
-
-请求体：`SyncPayload`
-
-```json
-{
-  "documents": [],
-  "notes": [],
-  "senderDeviceId": "uuid",
-  "senderDeviceName": "发起方"
-}
-```
-
-说明：笔记已迁至独立的 `Note_Content` 表，阅读器也已迁至独立的 `Read_Books` / `Read_Annotation` 表，三者本次均不参与同步——payload 的 `documents` 与 `notes` 始终为空；服务端 `merge_payload` 直接忽略收到的 `documents`（计入 `rejected`）与 `notes`。字段保留仅为新旧客户端兼容。
-
-响应 200：`SyncResponse`
-
-```json
-{
-  "accepted": 2,
-  "rejected": 1,
-  "merged": 3,
-  "serverPayload": { "documents": [], "notes": [], "senderDeviceId": "...", "senderDeviceName": "..." }
-}
-```
-
-错误：
-
-| 状态码 | 场景 |
-|---|---|
-| 400 | 读取请求体失败、JSON 解析失败 |
-| 404 | 其他路径 |
-| 500 | 数据库路径/打开/合并/读取失败 |
-
-服务端行为：合并请求数据 → 读取合并后的本地全量 → 返回。发起方收到后需再调用 `apply_local_payload` 合并 `serverPayload`，完成双向同步。
-
-## 7.9 前端 API 封装
+## 7.8 前端 API 封装
 
 ### 记事本 `src/modules/notepad/api.ts`
 
@@ -449,19 +313,11 @@ readYsFile()   // 读取 data/其他/ys.json，缺失时返回 null
 ### 平台 `src/platform/services/config.ts`
 
 ```ts
-getConfig / setConfig
-getSyncReceiveEnabled / setSyncReceiveEnabled
-getDeviceName / setDeviceName
-startDiscoveryListener / stopDiscoveryListener
-scanDevices(selfDeviceId, timeoutMs?)
-startSyncServer / stopSyncServer
-checkRemoteDevice(ipAddress)
-getSyncPayload(deviceId, deviceName)
-exchangeSyncData(ipAddress, payload)
-applyLocalPayload(payload)
+getConfig(key)     // invoke get_config
+setConfig(key, value)  // invoke set_config
 ```
 
-`CONFIG_KEYS`：`sync.receive.enabled`、`sync.port`、`device.name`。
+`app_config` 作为通用键值配置能力保留，当前应用没有内置配置键。
 
 ### 平台 `src/platform/services/logger.ts`
 
@@ -478,7 +334,7 @@ getLogDir()
 getDeviceId(): string  // localStorage 'mysystem_device_id'，首次生成 UUID v4
 ```
 
-## 7.10 错误信息约定
+## 7.9 错误信息约定
 
 - 所有命令返回 `Result<_, String>`，错误为可直接展示的中文文案；
 - 前端通常让 Promise reject 向上传递，由视图 `try/catch` 或 store 处理；
@@ -491,4 +347,3 @@ getDeviceId(): string  // localStorage 'mysystem_device_id'，首次生成 UUID 
   - `「未命名」是默认文件夹，不能删除`
   - `不支持的文件格式: xxx`
   - `拒绝删除 data/books 目录之外的文件`
-  - `对方返回错误状态码: ...`

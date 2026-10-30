@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import SyncSettings from './settings/components/SyncSettings.vue';
-import SyncLog from './settings/components/SyncLog.vue';
 import LogViewer from './settings/components/LogViewer.vue';
 </script>
 
@@ -8,8 +6,6 @@ import LogViewer from './settings/components/LogViewer.vue';
     <div class="settings-view">
         <h1 class="page-title">设置</h1>
 
-        <SyncSettings />
-        <SyncLog />
         <LogViewer />
 
         <section class="settings-section">

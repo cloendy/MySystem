@@ -95,17 +95,6 @@ pub fn init_database(app: &tauri::AppHandle) -> Result<(), String> {
         CREATE INDEX IF NOT EXISTS idx_note_folders_parent_order
           ON Note_Folders (Folder_Parent_ID, Folder_Order);
 
-        CREATE TABLE IF NOT EXISTS sync_operations (
-          id TEXT PRIMARY KEY,
-          document_id TEXT NOT NULL,
-          operation TEXT NOT NULL,
-          field TEXT,
-          value TEXT,
-          timestamp INTEGER NOT NULL,
-          device_id TEXT NOT NULL,
-          synced INTEGER NOT NULL DEFAULT 0
-        );
-
         CREATE TABLE IF NOT EXISTS app_config (
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL,

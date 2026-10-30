@@ -51,7 +51,7 @@ export interface ModuleInterface {
 export interface ModuleContext {
     platform: Platform;
     events: EventBus;
-    // 后续会加入 storage、sync、config 等
+    // 后续会加入 storage、config 等
 }
 
 /**

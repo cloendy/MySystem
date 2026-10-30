@@ -2,7 +2,7 @@
 
 import { logger } from '../../../platform/services/logger'
 import { confirmAction, chooseAction } from '../../../platform/services/dialog'
-import { onMounted, onUnmounted, computed, ref } from 'vue';
+import { onMounted, computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useReaderStore } from '../stores/reader';
 import type { Book } from '../types';
@@ -46,16 +46,7 @@ function setViewMode(mode: 'grid' | 'list') {
 
 onMounted(async () => {
     await store.fetchBooks();
-    window.addEventListener('mysystem:sync-completed', handleSyncCompleted);
 });
-
-onUnmounted(() => {
-    window.removeEventListener('mysystem:sync-completed', handleSyncCompleted);
-});
-
-async function handleSyncCompleted() {
-    await store.fetchBooks();
-}
 
 const filteredBooks = computed(() => {
     if (filter.value === 'all') return store.books;

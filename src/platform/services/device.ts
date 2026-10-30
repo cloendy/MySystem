@@ -1,7 +1,7 @@
 /**
  * 平台设备标识服务。
  *
- * 设备 ID 是同步协议中标识本机的稳定标识，首次调用时生成并缓存到 localStorage。
+ * 设备 ID 是标识本机的稳定标识，写入各业务表的 `Device_ID` 字段。
  */
 
 const DEVICE_ID_KEY = 'mysystem_device_id';

@@ -93,10 +93,6 @@ fn open_conn(app: &tauri::AppHandle) -> Result<Connection, String> {
     Connection::open(path).map_err(|e| format!("打开数据库失败: {}", e))
 }
 
-fn now_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis()
-}
-
 /// 阅读器表使用 DATETIME 文本存储（UTC），格式固定便于字符串排序。
 const DATETIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.3f";
 
@@ -109,24 +105,6 @@ fn ms_to_datetime(ms: i64) -> String {
     chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
         .map(|dt| dt.format(DATETIME_FORMAT).to_string())
         .unwrap_or_default()
-}
-
-fn log_sync_op(
-    conn: &Connection,
-    document_id: &str,
-    operation: &str,
-    field: &str,
-    value: &str,
-    device_id: &str,
-) -> Result<(), String> {
-    let id = Uuid::new_v4().to_string();
-    conn.execute(
-        "INSERT INTO sync_operations (id, document_id, operation, field, value, timestamp, device_id, synced)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
-        params![id, document_id, operation, field, value, now_ms(), device_id],
-    )
-    .map_err(|e| format!("写入同步日志失败: {}", e))?;
-    Ok(())
 }
 
 fn row_to_book(row: &rusqlite::Row) -> rusqlite::Result<Book> {
@@ -461,7 +439,6 @@ pub fn create_book(app: tauri::AppHandle, input: CreateBookInput) -> Result<Book
     )
     .map_err(|e| format!("插入书籍失败: {}", e))?;
 
-    log_sync_op(&tx, &id, "create", "title", &input.title, &input.device_id)?;
     tx.commit().map_err(|e| e.to_string())?;
 
     Ok(Book {
@@ -544,7 +521,6 @@ pub fn update_book(app: tauri::AppHandle, input: UpdateBookInput) -> Result<Book
         return Err("书籍不存在".to_string());
     }
 
-    log_sync_op(&tx, &input.id, "update", "", "", &input.device_id)?;
     tx.commit().map_err(|e| e.to_string())?;
 
     let book = get_book(app, input.id)?.ok_or_else(|| "书籍不存在".to_string())?;
@@ -579,7 +555,6 @@ pub fn delete_book(app: tauri::AppHandle, id: String, device_id: String) -> Resu
     )
     .map_err(|e| format!("删除书籍标注失败: {}", e))?;
 
-    log_sync_op(&tx, &id, "delete", "", "", &device_id)?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -619,7 +594,6 @@ pub fn create_annotation(
     )
     .map_err(|e| format!("插入标注失败: {}", e))?;
 
-    log_sync_op(&tx, &id, "create", "text", &input.text, &input.device_id)?;
     tx.commit().map_err(|e| e.to_string())?;
 
     Ok(Annotation {
