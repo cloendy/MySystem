@@ -12,16 +12,47 @@ pub fn init_database(app: &tauri::AppHandle) -> Result<(), String> {
 
     conn.execute_batch(
         r#"
-        CREATE TABLE IF NOT EXISTS documents (
-          id TEXT PRIMARY KEY,
-          type TEXT NOT NULL,
-          title TEXT NOT NULL,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL,
-          deleted_at INTEGER,
-          version INTEGER NOT NULL DEFAULT 1,
-          device_id TEXT NOT NULL
+        CREATE TABLE IF NOT EXISTS Read_Books (
+          Book_ID VARCHAR(10) PRIMARY KEY NOT NULL,
+          Book_Title TEXT NOT NULL DEFAULT '',
+          Book_Author TEXT NOT NULL DEFAULT '',
+          Book_Hash CHAR(64) NOT NULL DEFAULT '',
+          File_Path TEXT NOT NULL,
+          File_Format VARCHAR(8) NOT NULL,
+          Total_Pages INTEGER NOT NULL DEFAULT 0,
+          Current_Page INTEGER NOT NULL DEFAULT 0,
+          Reading_Status VARCHAR(12) NOT NULL DEFAULT 'unread',
+          Cover_Url TEXT,
+          Create_Time DATETIME NOT NULL,
+          Update_Time DATETIME NOT NULL,
+          Delete_Time DATETIME,
+          Device_ID TEXT NOT NULL DEFAULT '',
+          Version INTEGER NOT NULL DEFAULT 1
         );
+
+        CREATE INDEX IF NOT EXISTS idx_read_books_hash
+          ON Read_Books (Book_Hash, Delete_Time);
+
+        CREATE INDEX IF NOT EXISTS idx_read_books_list
+          ON Read_Books (Delete_Time, Update_Time);
+
+        CREATE TABLE IF NOT EXISTS Read_Annotation (
+          Annotation_ID VARCHAR(10) PRIMARY KEY NOT NULL,
+          Book_ID VARCHAR(10) NOT NULL,
+          Annotation_Text TEXT NOT NULL,
+          Annotation_Note TEXT NOT NULL DEFAULT '',
+          Page INTEGER NOT NULL DEFAULT 0,
+          Position TEXT NOT NULL DEFAULT '',
+          Color VARCHAR(16) NOT NULL DEFAULT '#FFEB3B',
+          Create_Time DATETIME NOT NULL,
+          Update_Time DATETIME NOT NULL,
+          Delete_Time DATETIME,
+          Device_ID TEXT NOT NULL DEFAULT '',
+          Version INTEGER NOT NULL DEFAULT 1
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_read_annotation_book
+          ON Read_Annotation (Book_ID, Delete_Time, Page);
 
         CREATE TABLE IF NOT EXISTS Note_Content (
           Note_ID VARCHAR(10) PRIMARY KEY NOT NULL,
@@ -63,27 +94,6 @@ pub fn init_database(app: &tauri::AppHandle) -> Result<(), String> {
 
         CREATE INDEX IF NOT EXISTS idx_note_folders_parent_order
           ON Note_Folders (Folder_Parent_ID, Folder_Order);
-
-        CREATE TABLE IF NOT EXISTS books (
-          document_id TEXT PRIMARY KEY REFERENCES documents(id),
-          author TEXT,
-          cover_url TEXT,
-          file_path TEXT NOT NULL,
-          file_format TEXT NOT NULL,
-          total_pages INTEGER DEFAULT 0,
-          current_page INTEGER DEFAULT 0,
-          reading_status TEXT DEFAULT 'unread'
-        );
-
-        CREATE TABLE IF NOT EXISTS annotations (
-          document_id TEXT PRIMARY KEY REFERENCES documents(id),
-          book_id TEXT NOT NULL,
-          text TEXT NOT NULL,
-          note TEXT DEFAULT '',
-          page INTEGER,
-          position TEXT,
-          color TEXT DEFAULT '#FFEB3B'
-        );
 
         CREATE TABLE IF NOT EXISTS sync_operations (
           id TEXT PRIMARY KEY,

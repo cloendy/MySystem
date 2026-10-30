@@ -28,6 +28,11 @@ pub fn run() {
                 crate::log_error!("[Notepad] 模块初始化失败: {}", e);
             }
 
+            // 阅读器旧表迁移（documents/books/annotations -> Read_Books/Read_Annotation）
+            if let Err(e) = modules::reader::init(app.handle()) {
+                crate::log_error!("[Reader] 模块初始化失败: {}", e);
+            }
+
             // 允许 asset 协议读取 data 目录，用于书籍文件预览
             if let Ok(data_dir) = platform::paths::data_dir(app.handle()) {
                 if let Err(e) = app.asset_protocol_scope().allow_directory(&data_dir, true) {

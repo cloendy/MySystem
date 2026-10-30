@@ -18,7 +18,7 @@ const notes = await invoke<Note[]>('list_notes', { folderId: null });
 - 业务模块不直接 `invoke`，而是通过自己的 `api.ts` 封装，并自动注入 `getDeviceId()`。
 - 新增命令必须加入 `commands.rs` 的 `invoke_handler()`，否则报 “command not found”。
 
-## 7.2 命令总览（35 个）
+## 7.2 命令总览（37 个）
 
 ### 平台：日志（4）
 
@@ -82,8 +82,20 @@ const notes = await invoke<Note[]>('list_notes', { folderId: null });
 | `create_annotation` | `{ input: CreateAnnotationInput & { deviceId } }` | `Annotation` |
 | `list_annotations` | `{ bookId }` | `Annotation[]` |
 | `delete_annotation` | `{ id, deviceId }` | 无 |
-| `import_book_file` | `{ sourcePath }` | `{ filePath, fileFormat, title }` |
+| `import_book_file` | `{ sourcePath }` | `{ filePath, fileFormat, title, hash, duplicate, existing }` |
 | `delete_book_file` | `{ filePath }` | 无 |
+
+### JSON 分析（1）
+
+| 命令 | 参数 | 返回 |
+|---|---|---|
+| `read_json_file` | `{ path }` | `{ path, content, size }` |
+
+### 角色图鉴（1）
+
+| 命令 | 参数 | 返回 |
+|---|---|---|
+| `read_ys_file` | 无 | `{ path, content, size } \| null` |
 
 ## 7.3 平台命令详情
 
@@ -223,49 +235,54 @@ exchange_sync_data(ipAddress, payload): Promise<SyncResponse>    // 30s 超时
     "filePath": "D:/.../data/books/<uuid>.epub",
     "fileFormat": "epub",
     "totalPages": 12,
+    "hash": "9f86d081884c7d659a2feaa0c55ad015...",
     "deviceId": "uuid"
   }
 }
 ```
 
-- 写入 `documents(type='book')` 与 `books`；
+- 写入 `Read_Books`（`Book_ID` 取 `MAX+1` 补零到十位，`Version = 1`，`Device_ID` 取输入设备）；
+- `hash` 可选，通常由 `import_book_file` 返回后透传；
 - 初始 `currentPage = 0`、`readingStatus = 'unread'`；
-- 不校验文件是否存在。
+- 不校验文件是否存在；允许同一 `Book_Hash` 存在多条记录（用户选择「仍然导入」时）。
 
 ### `list_books` / `get_book`
 
-按 `updated_at DESC` 返回；只返回 `deleted_at IS NULL` 的书。
+按 `Update_Time DESC` 返回；只返回 `Delete_Time IS NULL` 的书。
 
 ### `update_book`
 
-- 可选更新 `title`、`author`、`currentPage`、`readingStatus`；
-- 每次调用都会更新 `documents.updated_at`、`version + 1`、`device_id`；
-- 返回更新后的 `Book`。
+- 可选更新 `title`、`author`、`totalPages`、`currentPage`、`readingStatus`；
+- 每次调用都会更新 `Read_Books.Update_Time`、`Version + 1`、`Device_ID`；
+- `affected == 0` 时返回「书籍不存在或已删除」；返回更新后的 `Book`。
 
 ### `delete_book`
 
-软删除书籍文档；不删除物理文件、不级联标注。前端 store 会再调用 `delete_book_file`。
+软删除书籍（`Delete_Time = Update_Time = now, Version + 1`），并在同事务内级联软删除其全部标注；不删除物理文件。前端 store 会再调用 `delete_book_file`（若文件仍被其他书籍记录引用则保留）。
 
 ### `create_annotation`
 
-- 写入 `documents(type='annotation', title=标注文本)` 与 `annotations`；
-- `note` 默认 `''`，`position` 默认 `'{}'`，`color` 默认 `#FFEB3B`；
+- 写入 `Read_Annotation`（`Annotation_ID` 取 `MAX+1` 补零到十位）；
+- `bookId` 直接存书籍编号；`note` 默认 `''`，`position` 默认 `'{}'`，`color` 默认 `#FFEB3B`；
 - 同时写 `sync_operations(create)`。
 
 ### `list_annotations`
 
-按 `page ASC, created_at ASC` 返回指定书籍的未删除标注。
+按 `Page ASC, Create_Time ASC` 返回指定书籍的未删除标注。
 
 ### `delete_annotation`
 
-软删除，不检查是否已删除。
+软删除（`Delete_Time = Update_Time = now, Version + 1`）；`affected == 0` 时返回「标注不存在或已删除」。
 
 ### `import_book_file`
 
 - 校验源文件存在、扩展名属于 `epub/pdf/mobi/txt`；
+- 流式计算源文件 SHA-256；
+- 查 `Read_Books` 中是否存在相同 `Book_Hash` 且未删除的书：
+  - 命中：**不复制文件**，返回 `duplicate: true`、`existing: 已有 Book`、`filePath: 已有书籍路径`（前端据此弹出「打开已有 / 仍然导入 / 取消」）；
+  - 未命中：复制到 `<data>/books/<uuid>.<ext>`，返回 `duplicate: false`、`existing: null`；
 - 标题取文件名（不含扩展名）；
-- 复制到 `<data>/books/<uuid>.<ext>`；
-- 返回 `{ filePath, fileFormat, title }`；
+- 返回 `{ filePath, fileFormat, title, hash, duplicate, existing }`；
 - 不写入数据库，入库由前端随后调用 `create_book`。
 
 ### `delete_book_file`
@@ -274,7 +291,25 @@ exchange_sync_data(ipAddress, payload): Promise<SyncResponse>    // 30s 超时
 - 规范化路径后必须位于 `<data>/books` 内，否则返回「拒绝删除 data/books 目录之外的文件」；
 - 删除失败返回错误。
 
-## 7.6 局域网协议
+## 7.6 JSON 分析命令详情
+
+### `read_json_file`
+
+- 校验路径存在且为文件，大小不超过 10 MB；
+- 按 UTF-8 读取，失败返回「文件不是有效的 UTF-8 编码」；
+- 去掉开头的 BOM 后返回 `{ path, content, size }`（`size` 为文件字节数）；
+- 不建表、不持久化；分析本身在前端 `utils/analyzer.ts` 完成。
+
+## 7.7 角色图鉴命令详情
+
+### `read_ys_file`
+
+- 固定读取 `<data>/其他/ys.json`，不接受路径参数；
+- 文件不存在时返回 `null`，前端显示「没有找到 ys.json」空状态；
+- 文件大小上限 20 MB，按 UTF-8 读取并去掉开头 BOM；
+- 返回 `{ path, content, size }`；解析、归一化与筛选都在前端完成，不写数据库。
+
+## 7.8 局域网协议
 
 ### UDP 发现（端口 54321）
 
@@ -337,25 +372,14 @@ exchange_sync_data(ipAddress, payload): Promise<SyncResponse>    // 30s 超时
 
 ```json
 {
-  "documents": [
-    {
-      "id": "uuid",
-      "type": "book",
-      "title": "标题",
-      "createdAt": 1730000000000,
-      "updatedAt": 1730000000000,
-      "deletedAt": null,
-      "version": 1,
-      "deviceId": "uuid"
-    }
-  ],
+  "documents": [],
   "notes": [],
   "senderDeviceId": "uuid",
   "senderDeviceName": "发起方"
 }
 ```
 
-说明：笔记已迁至独立的 `Note_Content` 表，本次不参与同步——`documents` 只包含非 `note` 类型，`notes` 始终为空；服务端合并时跳过 `type = "note"` 的文档并忽略收到的 `notes`。字段保留仅为新旧客户端兼容。
+说明：笔记已迁至独立的 `Note_Content` 表，阅读器也已迁至独立的 `Read_Books` / `Read_Annotation` 表，三者本次均不参与同步——payload 的 `documents` 与 `notes` 始终为空；服务端 `merge_payload` 直接忽略收到的 `documents`（计入 `rejected`）与 `notes`。字段保留仅为新旧客户端兼容。
 
 响应 200：`SyncResponse`
 
@@ -378,7 +402,7 @@ exchange_sync_data(ipAddress, payload): Promise<SyncResponse>    // 30s 超时
 
 服务端行为：合并请求数据 → 读取合并后的本地全量 → 返回。发起方收到后需再调用 `apply_local_payload` 合并 `serverPayload`，完成双向同步。
 
-## 7.7 前端 API 封装
+## 7.9 前端 API 封装
 
 ### 记事本 `src/modules/notepad/api.ts`
 
@@ -408,6 +432,18 @@ listAnnotations(bookId)
 deleteAnnotation(id)       // 注入 deviceId
 importBookFile(sourcePath)
 deleteBookFile(filePath)
+```
+
+### JSON 分析 `src/modules/jsonview/api.ts`
+
+```ts
+readJsonFile(path)
+```
+
+### 角色图鉴 `src/modules/ys/api.ts`
+
+```ts
+readYsFile()   // 读取 data/其他/ys.json，缺失时返回 null
 ```
 
 ### 平台 `src/platform/services/config.ts`
@@ -442,7 +478,7 @@ getLogDir()
 getDeviceId(): string  // localStorage 'mysystem_device_id'，首次生成 UUID v4
 ```
 
-## 7.8 错误信息约定
+## 7.10 错误信息约定
 
 - 所有命令返回 `Result<_, String>`，错误为可直接展示的中文文案；
 - 前端通常让 Promise reject 向上传递，由视图 `try/catch` 或 store 处理；

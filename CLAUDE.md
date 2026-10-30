@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 完整项目文档位于 `doc/`，索引见 `doc/README.md`：系统架构、功能设计、UI、数据库、数据结构、开发 API、开发指南、部署配置、测试排错等。
 
-当前已实现两个模块：**记事本**（Markdown / 纯文本编辑、嵌套文件夹、标签、置顶、搜索）和 **阅读器**（EPUB/PDF/TXT 阅读、目录、标注高亮、阅读进度）；设置页已接入局域网设备发现与手动同步。
+当前已实现四个模块：**记事本**（Markdown / 纯文本编辑、嵌套文件夹、标签、置顶、搜索）、**阅读器**（EPUB/PDF/TXT 阅读、目录、标注高亮、阅读进度）、**JSON 分析**（导入文件或粘贴文本，展示结构与统计）和 **角色图鉴**（读取 `data/其他/ys.json`，列表展示、快捷筛选与自定义条件）；设置页已接入局域网设备发现与手动同步。
 
 ## 常用命令
 
@@ -39,7 +39,7 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
   - `router/index.ts` — 全局单例 vue-router（hash 模式）；`registerModuleRoutes()` 把模块路由统一加上 `/{moduleId}` 前缀注册，路由名加 `moduleId:` 前缀
   - `services/device.ts` — `getDeviceId()` 用 localStorage 键 `mysystem_device_id` 持久化设备 ID（UUID v4），各模块 API 与设置页从这里取设备 ID
   - `services/config.ts` — 配置读写 + 设备发现 + 同步 HTTP 客户端的前端 invoke 封装（`getConfig`/`setConfig`、`startDiscoveryListener`/`scanDevices`、`startSyncServer`、`checkRemoteDevice`/`exchangeSyncData`/`getSyncPayload`/`applyLocalPayload`）
-- `src/modules/<id>/` — 功能模块（现有 `notepad`、`reader`），模块自包含：
+- `src/modules/<id>/` — 功能模块（现有 `notepad`、`reader`、`jsonview`、`ys`），模块自包含：
   1. 提供 `index.ts` 默认导出实现 `ModuleInterface`，在实例上声明元数据（`id` 必填；`icon`/`order`/`enabled` 可选，`enabled` 未声明的平台默认启用）
   2. 视图放在模块自己的 `views/` 下
   3. 不需要任何注册文件；放进 `src/modules/` 即被自动发现
@@ -58,7 +58,9 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
   |---|---|
   | `notepad/mod.rs` | `create_note`/`get_note`/`list_notes`/`update_note`/`delete_note`/`search_notes`；表为独立的 `Note_Content`（`Note_ID` 十位补零自增主键、`Note_Title` 最多 20 字符、`Delete_Time` 软删除、`Is_Pinned` 置顶、`Device_ID`/`Version` 写入记录、`Tags` 存 JSON；`Is_Folder` + `Folder1~3` 冗余文件夹路径） |
   | `notepad/folders.rs` | 文件夹 CRUD，表为 `Note_Folders`（`Folder_ID` 四位补零自增、`Folder_Level` 0/1/2/3、`Folder_Parent_ID`/`Folder_Parent_Name` 冗余父级信息、`Folder_Order` 同级顺序）；最多嵌套 3 层（全部笔记/A/B/C），同级不允许重名；删除时其中笔记和子文件夹移动到被删文件夹的父级（删除根级文件夹时，笔记归入「未命名」、子文件夹保留在根级），子文件夹重名时改名为 `原名_folder_被删文件夹名`；`migrate_legacy_folders` 在启动时把旧 `folders` 表迁移过来并删除旧表，`ensure_default_folder` 创建固定 id 为 `0001`、层级 0、排序 0 的「未命名」；`refresh_note_paths` 按 `Note_Folders` 父链重建 `Note_Content` 的四列路径 |
-  | `reader/mod.rs` | 书籍与标注 CRUD、`import_book_file`、`delete_book_file` |
+  | `reader/mod.rs` | 书籍与标注 CRUD、`import_book_file`、`delete_book_file`；表为独立的 `Read_Books` / `Read_Annotation`（`Book_ID` / `Annotation_ID` 十位补零自增主键、PascalCase 字段、`Delete_Time` 软删除、`Device_ID`/`Version`）；`Book_Hash` 保存源文件 SHA-256 用于导入去重，`Read_Annotation.Position` 按格式存 CFI / 归一化矩形 / 章节偏移 JSON；`init` 在启动时把旧 `documents`/`books`/`annotations` 迁移到新表并删除旧表；`delete_book` 级联软删除标注 |
+  | `jsonview/mod.rs` | `read_json_file`：读取本地 UTF-8 JSON 文件（最大 10 MB、去掉 BOM），供前端分析结构；不建表、不持久化 |
+  | `ys/mod.rs` | `read_ys_file`：读取 `<data>/其他/ys.json`（最大 20 MB、去 BOM；文件不存在返回 `null`），前端每次进入页面重新解析与展示；不建表、不持久化 |
 
 - `platform/` — 平台基础服务（不包含业务逻辑），均直接使用 `rusqlite` 打开 SQLite 文件：
 
@@ -71,7 +73,7 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
   | `discovery.rs` | UDP 局域网设备发现（端口 54321，magic `MYSYSTEM_V1`，`discover`/`announce`） |
   | `http_server.rs` | 基于 `tiny_http` 的同步服务端（端口 54322）：`GET /api/info`、`POST /api/sync/exchange` |
   | `http_client.rs` | 基于 `reqwest` 的客户端：握手与数据交换 |
-  | `sync_payload.rs` | `SyncPayload`/`SyncResponse` 定义、全量读取与按 `updated_at` 合并 |
+  | `sync_payload.rs` | `SyncPayload`/`SyncResponse` 定义；当前 `documents`/`notes` 均为空数组（全部业务数据暂停同步），合并时忽略收到的数据 |
 
 - Rust 模型使用 `#[serde(rename_all = "camelCase")]`；前端对应类型在各模块 `types.ts`。注意 `Note.tags` 在 Rust 是 `Vec<String>`、数据库存 JSON 字符串，模块 API 返回给前端时已是数组。
 
@@ -86,7 +88,8 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
   - `log_dir()`：`<data>/log`
 - 新增存储代码必须复用 `paths.rs`，不要再自行拼 `app_data_dir()` 或 exe 目录。
 - 书籍文件：`import_book_file` 复制到 `<data>/books/`；`delete_book_file` 只允许删除 canonicalize 后位于 `<data>/books/` 内的文件。
-- 统一基表为 `documents`（id/type/title/created_at/updated_at/deleted_at/version/device_id），阅读器扩展表通过 `document_id` 外键关联：`books`、`annotations`。`annotations` 的主键就是 `document_id`（一条标注 = 一条 `type='annotation'` 的 document）。
+- 角色图鉴读取**外部数据文件** `<data>/其他/ys.json`（字段说明见 `data/其他/设定.txt`），只读、不入库；文件缺失时模块显示空状态，每次进入页面重新读取，因此修改 JSON 后重新打开即可生效。远程角色图标依赖 CSP 中的 `https://act-webstatic.mihoyo.com`。
+- 阅读器使用**独立表 `Read_Books` / `Read_Annotation`**，与 `documents`/`books`/`annotations` 旧表无关：主键 `Book_ID`/`Annotation_ID` 为十位补零字符串（`0000000001` 起自增），字段 PascalCase，`Book_Hash` 保存源文件 SHA-256（导入去重，命中时前端三选一：打开已有/仍然导入/取消），`Read_Annotation.Book_ID` 逻辑关联书籍，`Position` 按格式存 `{"cfi"}`（EPUB）/ `{"page",rects}`（PDF 归一化矩形）/ `{"chapter",start,end}`（TXT 章节内偏移）；`Delete_Time` 软删除、`Device_ID`/`Version` 记录最后写入；`Create_Time`/`Update_Time`/`Delete_Time` 为 `DATETIME` UTC 文本（`YYYY-MM-DD HH:MM:SS.mmm`）；启动时 `modules::reader::init()` 迁移旧表数据并删除 `annotations`/`books`/`documents`。
 - 记事本笔记使用**独立表 `Note_Content`**，不再写入 `documents`：主键 `Note_ID` 为十位补零字符串（`0000000001` 起自增），标题 `Note_Title` 最多 20 字符（前后端都校验/限制），`Delete_Time` 软删除，`Is_Pinned` 为 `'0'`/`'1'`，`Device_ID` / `Version` 记录最后写入设备与版本（创建 1，更新/删除 +1）；文件夹路径冗余在 `Is_Folder` + `Folder1~3`（`0` 表示「未命名」且三列全空，`N` 表示当前文件夹 ID 放在 `FolderN`，父链依次向前填）。启动时 `ensure_note_content_columns` 补齐后加列，`migrate_legacy_notes` 把旧 `notes` + `documents(type='note')` 迁移过来并删除旧数据/旧表（需先删 `notes` 再删 `documents`，否则外键检查失败）。
 - 记事本文件夹：表为 `Note_Folders`，`Folder_ID` 为四位补零字符串（`0001` 起自增，主键），`Folder_Level` 取 0/1/2/3（0 仅用于默认文件夹，1~3 为嵌套层级，3 之下不可再建），`Folder_Order` 为同级顺序（默认文件夹为 0，其余从 1 开始），`Folder_Flg1~3` 为备用字段。`Folder_Name + Folder_Level + Folder_Parent_ID` 唯一（同级不允许重名，前后端都校验），`Folder_Parent_ID`/`Folder_Parent_Name` 在重命名和移动子文件夹时同步维护。默认文件夹「未命名」固定 `0001 / 层级 0 / 排序 0`，由 `modules::notepad::init` 在启动时创建，新建笔记未指定文件夹时归入其中。旧版 `folders` 表由 `migrate_legacy_folders` 在启动时迁移：`uncategorized` → `0001 未命名`，其余按原层级与顺序重新编号为 `0002` 起，随后删除旧表。文件夹层级/父级变化后由 `refresh_note_paths` 重建 `Note_Content` 的 `Is_Folder` + `Folder1~3`。
 
@@ -104,7 +107,7 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
 - **发现**：UDP 54321 广播 `discover` 消息，监听方回复 `announce`；设备 ID/名称/平台随消息携带。
 - **交换**：HTTP 54322，`GET /api/info` 握手，`POST /api/sync/exchange` 交换数据。
 - **流程**（设置页手动触发）：本机 `get_sync_payload` 读出全量 → `exchange_sync_data` 发给对方 → 对方 `merge_payload` 并按 `updated_at` 合并（新覆盖旧，相等或本地更新则拒绝）→ 对方返回自己的全量 `server_payload` → 本机 `apply_local_payload` 再合并一次。
-- **范围**：payload 只包含 `documents` 中**非 `note` 类型**的记录；笔记（`Note_Content`）、文件夹、书籍、标注均不同步。`notes` 字段固定为空数组以兼容旧客户端，合并时忽略。目前是全量交换，未使用 `sync_operations` 增量日志。
+- **范围**：payload 的 `documents` 与 `notes` 均为空数组——笔记（`Note_Content`）、文件夹、书籍（`Read_Books`）、标注（`Read_Annotation`）全部暂停同步（各设备独立自增编号）；合并时收到的数据只计入 `rejected`。目前是全量交换，未使用 `sync_operations` 增量日志。
 - 端口目前硬编码（54321/54322）。同步相关配置存在 `app_config`：`sync.receive.enabled`、`device.name`。
 - 全局搜索尚未接入：`ModuleInterface.onSearch` 已定义，但 `AppShell` 的搜索框仍是 disabled。
 
@@ -120,7 +123,7 @@ cargo check         # 在 src-tauri/ 内单独检查 Rust 代码
 - 代码注释、日志、UI 文案均使用中文；标识符用英文
 - 前端日志统一用 `logger`（`platform/services/logger.ts`），Rust 日志统一用 `log_*!` 宏；不要用裸 `console.*` / `println!`
 - 平台类型只有 `'windows' | 'android'`（`module-types.ts`），平台检测在 `module-loader.ts` 的 `detectPlatform()`（目前基于 userAgent 粗略判断）
-- 时间戳统一为 Unix 毫秒（`chrono::Utc::now().timestamp_millis()`）
+- 时间戳统一为 Unix 毫秒（`chrono::Utc::now().timestamp_millis()`）；例外：阅读器两表 `Read_Books` / `Read_Annotation` 的 `Create_Time` / `Update_Time` / `Delete_Time` 使用 `DATETIME` UTC 文本（`YYYY-MM-DD HH:MM:SS.mmm`），Rust/TS 类型为 `String` / `string`
 - 笔记标题最多 20 个字符：编辑页 `maxlength=20`，Rust 侧 `chars().count()` 校验，超出返回错误
 - 新增 Rust 命令：在对应 `platform/*.rs` 或 `modules/<id>/*.rs` 实现 `#[tauri::command]` → 在 `commands.rs` 的 `invoke_handler()` 中注册 → 前端在对应 `api.ts` 封装
 - 新增数据表：在 `platform/database_init.rs` 添加建表语句，并同时在 Rust 侧实现读写

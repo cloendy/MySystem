@@ -4,6 +4,7 @@ import { logger } from './platform/services/logger'
 import { onMounted, ref } from 'vue';
 import AppShell from './platform/shell/AppShell.vue';
 import MobileShell from './platform/shell/MobileShell.vue';
+import ChoiceDialog from './platform/components/ChoiceDialog.vue';
 import {
   detectPlatform,
   loadEnabledModules,
@@ -42,4 +43,7 @@ onMounted(async () => {
   <div v-else style="padding: 20px;">
     <p>加载中...</p>
   </div>
+
+  <!-- 全局三选一对话框 -->
+  <ChoiceDialog />
 </template>

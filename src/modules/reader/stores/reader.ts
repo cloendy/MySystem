@@ -64,11 +64,17 @@ export const useReaderStore = defineStore('reader', () => {
         // 先删除数据库记录
         await api.deleteBook(id);
 
-        // 尝试删除物理文件（失败也不影响）
-        try {
-            await api.deleteBookFile(book.filePath);
-        } catch (err) {
-            logger.warn('[Reader] 删除文件失败（可能是外部路径）:', err);
+        // 同一文件可能被「仍然导入」产生的多条记录共用，仍被引用时保留文件
+        const shared = books.value.some((b) => b.id !== id && b.filePath === book.filePath);
+        if (shared) {
+            logger.info('[Reader] 文件仍被其他书籍引用，保留:', book.filePath);
+        } else {
+            // 尝试删除物理文件（失败也不影响）
+            try {
+                await api.deleteBookFile(book.filePath);
+            } catch (err) {
+                logger.warn('[Reader] 删除文件失败（可能是外部路径）:', err);
+            }
         }
 
         books.value = books.value.filter((b) => b.id !== id);

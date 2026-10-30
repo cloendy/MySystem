@@ -8,6 +8,7 @@ import EpubReader from '../components/EpubReader.vue';
 import PdfReader from '../components/PdfReader.vue';
 import TxtReader from '../components/TxtReader.vue';
 import AnnotationPanel from '../components/AnnotationPanel.vue';
+import type { Annotation } from '../types';
 
 const route = useRoute();
 const router = useRouter();
@@ -35,6 +36,10 @@ const txtTotalChapters = computed(() => txtRef.value?.totalChapters ?? 0);
 const txtCurrentIndex = computed(() => txtRef.value?.currentIndex ?? 0);
 const txtPageMode = computed(() => txtRef.value?.pageMode ?? 'page');
 
+/** 当前格式是否支持目录面板（EPUB 侧栏 / TXT 章节列表） */
+const hasToc = computed(() => fileFormat.value === 'epub' || fileFormat.value === 'txt');
+const jumpPlaceholder = computed(() => (fileFormat.value === 'pdf' ? '页码' : '章节号'));
+
 function goBack() {
     router.push('/reader/');
 }
@@ -51,6 +56,11 @@ function nextPage() {
     else if (fileFormat.value === 'txt') txtRef.value?.nextPage();
 }
 
+function toggleToc() {
+    if (fileFormat.value === 'epub') tocVisible.value = !tocVisible.value;
+    else if (fileFormat.value === 'txt') txtRef.value?.toggleChapterList();
+}
+
 function handleTocClick(href: string) {
     epubRef.value?.goToHref(href);
     tocVisible.value = false;
@@ -60,21 +70,40 @@ function handleJump() {
     const val = jumpInput.value.trim();
     if (!val) return;
     const num = parseInt(val, 10);
-    const total = txtTotalChapters.value;
-    if (isNaN(num) || num < 1 || num > total) {
-        alert(`请输入 1-${total} 之间的章节号`);
+    if (isNaN(num)) return;
+
+    if (fileFormat.value === 'pdf') {
+        const total = pdfPageCount.value;
+        if (num < 1 || num > total) {
+            alert(`请输入 1-${total} 之间的页码`);
+            return;
+        }
+        pdfRef.value?.goToPage(num);
+    } else if (fileFormat.value === 'txt') {
+        const total = txtTotalChapters.value;
+        if (num < 1 || num > total) {
+            alert(`请输入 1-${total} 之间的章节号`);
+            return;
+        }
+        txtRef.value?.goToChapter(num - 1);
+    } else {
         return;
     }
-    txtRef.value?.goToChapter(num - 1);
     jumpInput.value = '';
 }
 
-function handleAnnotationJump(cfi: string) {
-    epubRef.value?.goToCfi(cfi);
+/** 标注跳转：按格式转发给对应阅读器 */
+function handleAnnotationJump(ann: Annotation) {
+    if (fileFormat.value === 'epub') epubRef.value?.jumpToAnnotation(ann);
+    else if (fileFormat.value === 'pdf') pdfRef.value?.jumpToAnnotation(ann);
+    else if (fileFormat.value === 'txt') txtRef.value?.jumpToAnnotation(ann);
 }
 
-function handleAnnotationRemove(cfi: string) {
-    epubRef.value?.removeAnnotationHighlight(cfi);
+/** 删除标注后移除对应高亮 */
+function handleAnnotationRemove(ann: Annotation) {
+    if (fileFormat.value === 'epub') epubRef.value?.removeAnnotationHighlight(ann);
+    else if (fileFormat.value === 'pdf') pdfRef.value?.removeAnnotationHighlight(ann);
+    else if (fileFormat.value === 'txt') txtRef.value?.removeAnnotationHighlight(ann);
 }
 
 function handleKeydown(e: KeyboardEvent) {
@@ -132,6 +161,23 @@ watch(
     },
 );
 
+// TXT 打开后按实际章节数回写 totalPages，顺带修正历史数据
+watch(
+    txtTotalChapters,
+    async (total) => {
+        if (fileFormat.value !== 'txt' || !total) return;
+        const book = store.currentBook;
+        if (!book || book.totalPages === total) return;
+        try {
+            await store.editBook({ id: book.id, totalPages: total });
+            logger.info(`[TXT] 章节数已修正: ${book.totalPages} -> ${total}`);
+        } catch (err) {
+            logger.warn('[TXT] 修正章节数失败:', err);
+        }
+    },
+    { immediate: true },
+);
+
 onMounted(async () => {
     try {
         const id = route.params.id as string;
@@ -175,19 +221,8 @@ onUnmounted(async () => {
         <div class="toolbar reader-toolbar">
             <button class="btn" @click="goBack">← 返回书架</button>
 
-            <button v-if="fileFormat === 'epub'" class="btn" @click="tocVisible = !tocVisible">
-                目录
-            </button>
-            <button v-if="fileFormat === 'epub'" class="btn" @click="annotationVisible = !annotationVisible">
-                标注
-            </button>
-            <button v-if="fileFormat === 'txt'" class="btn" @click="txtRef?.toggleChapterList()">
-                目录
-            </button>
-            <button v-if="fileFormat === 'txt'" class="btn" :title="`当前：${txtPageMode === 'scroll' ? '滚动模式' : '翻页模式'}，点击切换`"
-                @click="txtRef?.togglePageMode()">
-                {{ txtPageMode === 'scroll' ? '📜 滚动' : '📄 翻页' }}
-            </button>
+            <button v-if="hasToc" class="btn" @click="toggleToc">目录</button>
+            <button class="btn" @click="annotationVisible = !annotationVisible">标注</button>
 
             <span class="book-title">{{ store.currentBook?.title }}</span>
 
@@ -201,12 +236,19 @@ onUnmounted(async () => {
 
             <span class="spacer"></span>
 
-            <!-- TXT 跳章 -->
-            <template v-if="fileFormat === 'txt' && txtTotalChapters > 0">
-                <input v-model="jumpInput" class="text-input jump-input" type="text" placeholder="章节号"
-                    @keydown.enter="handleJump" />
+            <!-- PDF / TXT 位置跳转 -->
+            <template v-if="(fileFormat === 'txt' && txtTotalChapters > 0) || (fileFormat === 'pdf' && pdfPageCount > 0)">
+                <input v-model="jumpInput" class="text-input jump-input" type="text"
+                    :placeholder="jumpPlaceholder" @keydown.enter="handleJump" />
                 <button class="btn" @click="handleJump">跳转</button>
             </template>
+
+            <!-- TXT 翻页 / 滚动模式 -->
+            <button v-if="fileFormat === 'txt'" class="btn"
+                :title="`当前：${txtPageMode === 'scroll' ? '滚动模式' : '翻页模式'}，点击切换`"
+                @click="txtRef?.togglePageMode()">
+                {{ txtPageMode === 'scroll' ? '📜 滚动' : '📄 翻页' }}
+            </button>
 
             <!-- PDF 缩放 -->
             <template v-if="fileFormat === 'pdf'">
@@ -243,7 +285,7 @@ onUnmounted(async () => {
                     :book="store.currentBook" />
             </div>
 
-            <AnnotationPanel v-if="annotationVisible && fileFormat === 'epub' && store.currentBook"
+            <AnnotationPanel v-if="annotationVisible && store.currentBook"
                 :book-id="store.currentBook.id" @jump="handleAnnotationJump" @remove="handleAnnotationRemove" />
         </div>
     </div>

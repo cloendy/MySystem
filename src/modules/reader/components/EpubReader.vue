@@ -4,8 +4,9 @@ import { logger } from '../../../platform/services/logger'
 import { onMounted, onUnmounted, ref, nextTick, defineExpose } from 'vue';
 import ePub, { Book as EpubBook, Rendition } from 'epubjs';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import type { Book } from '../types';
+import type { Annotation, Book } from '../types';
 import * as api from '../api';
+import AnnotationBubble from './AnnotationBubble.vue';
 
 const props = defineProps<{ book: Book }>();
 
@@ -291,12 +292,25 @@ async function goToCfi(cfi: string) {
     }
 }
 
+/** 跳转到标注位置（供父组件调用，与其他格式协议一致） */
+async function jumpToAnnotation(ann: Annotation) {
+    try {
+        const position = JSON.parse(ann.position || '{}');
+        if (position.cfi) await goToCfi(position.cfi);
+    } catch (err) {
+        logger.warn('[EPUB] 标注跳转失败:', err);
+    }
+}
+
 /**
- * 删除标注（供父组件调用后刷新高亮）
+ * 删除标注后移除高亮（供父组件调用）
  */
-async function removeAnnotationHighlight(cfi: string) {
+async function removeAnnotationHighlight(ann: Annotation) {
     if (!rendition) return;
     try {
+        const position = JSON.parse(ann.position || '{}');
+        const cfi = position.cfi;
+        if (!cfi) return;
         rendition.annotations.remove(cfi, 'highlight');
         appliedHighlights.delete(cfi);
     } catch (err) {
@@ -309,6 +323,7 @@ defineExpose({
     nextPage,
     goToHref,
     goToCfi,
+    jumpToAnnotation,
     removeAnnotationHighlight,
     toc,
     currentChapter,
@@ -323,14 +338,8 @@ defineExpose({
         <div v-if="errorMsg" class="overlay error">{{ errorMsg }}</div>
 
         <!-- 选中气泡 -->
-        <div v-if="selectionBubble.visible" class="selection-bubble"
-            :style="{ left: selectionBubble.x + 'px', top: selectionBubble.y + 'px' }" @click.stop>
-            <span class="bubble-label">添加标注</span>
-            <div class="color-row">
-                <button v-for="c in ['#FFEB3B', '#A5D6A7', '#90CAF9', '#F48FB1']" :key="c" class="color-btn"
-                    :style="{ background: c }" @click="saveAnnotation(c)"></button>
-            </div>
-        </div>
+        <AnnotationBubble v-if="selectionBubble.visible" :x="selectionBubble.x" :y="selectionBubble.y"
+            @select="saveAnnotation" />
     </div>
 </template>
 
@@ -345,47 +354,5 @@ defineExpose({
 .epub-viewer {
     width: 100%;
     height: 100%;
-}
-
-
-
-.selection-bubble {
-    position: fixed;
-    transform: translate(-50%, -100%);
-    background: white;
-    border: 1px solid #d0d0d0;
-    border-radius: 6px;
-    padding: 8px 10px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    z-index: 100;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    align-items: center;
-}
-
-.bubble-label {
-    font-size: 11px;
-    color: #666;
-    white-space: nowrap;
-}
-
-.color-row {
-    display: flex;
-    gap: 6px;
-}
-
-.color-btn {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    border: 1px solid rgba(0, 0, 0, 0.1);
-    cursor: pointer;
-    padding: 0;
-}
-
-.color-btn:hover {
-    transform: scale(1.15);
-    transition: transform 0.1s;
 }
 </style>

@@ -6,8 +6,8 @@ import { confirmAction } from '../../../platform/services/dialog';
 
 const props = defineProps<{ bookId: string }>();
 const emit = defineEmits<{
-    (e: 'jump', cfi: string): void;
-    (e: 'remove', cfi: string): void;
+    (e: 'jump', annotation: Annotation): void;
+    (e: 'remove', annotation: Annotation): void;
 }>();
 
 const annotations = ref<Annotation[]>([]);
@@ -26,18 +26,12 @@ async function handleDelete(ann: Annotation) {
     if (!(await confirmAction('确定删除这条标注？', '删除标注'))) return;
     await api.deleteAnnotation(ann.id);
     // 通知父组件移除高亮
-    try {
-        const pos = JSON.parse(ann.position || '{}');
-        if (pos.cfi) emit('remove', pos.cfi);
-    } catch { }
+    emit('remove', ann);
     annotations.value = annotations.value.filter((a) => a.id !== ann.id);
 }
 
 function handleJump(ann: Annotation) {
-    try {
-        const pos = JSON.parse(ann.position || '{}');
-        if (pos.cfi) emit('jump', pos.cfi);
-    } catch { }
+    emit('jump', ann);
 }
 
 function handleAnnotationAdded() {

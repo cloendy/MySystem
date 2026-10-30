@@ -50,6 +50,12 @@ export interface ImportedBookResult {
     filePath: string;
     fileFormat: string;
     title: string;
+    /** 源文件 SHA-256 */
+    hash: string;
+    /** 是否命中已存在的书籍（命中时不会复制文件） */
+    duplicate: boolean;
+    /** 命中时返回已有书籍记录 */
+    existing: Book | null;
 }
 
 export async function importBookFile(sourcePath: string): Promise<ImportedBookResult> {

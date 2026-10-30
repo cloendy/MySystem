@@ -46,5 +46,9 @@ pub fn invoke_handler() -> impl Fn(Invoke<tauri::Wry>) -> bool + Send + Sync + '
         crate::modules::reader::delete_annotation,
         crate::modules::reader::import_book_file,
         crate::modules::reader::delete_book_file,
+        // JSON 分析模块
+        crate::modules::jsonview::read_json_file,
+        // 角色图鉴模块
+        crate::modules::ys::read_ys_file,
     ]
 }

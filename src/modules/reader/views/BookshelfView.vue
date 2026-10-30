@@ -1,11 +1,12 @@
 <script setup lang="ts">
 
 import { logger } from '../../../platform/services/logger'
-import { confirmAction } from '../../../platform/services/dialog'
+import { confirmAction, chooseAction } from '../../../platform/services/dialog'
 import { onMounted, onUnmounted, computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useReaderStore } from '../stores/reader';
 import type { Book } from '../types';
+import { countChapters } from '../utils/txt';
 import { open } from '@tauri-apps/plugin-dialog';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import ePub from 'epubjs';
@@ -132,20 +133,8 @@ async function detectTotalPages(
         if (format === 'txt') {
             const resp = await fetch(url);
             const bytes = new Uint8Array(await resp.arrayBuffer());
-            const text = decodeTextForCount(bytes);
-            const lines = text.split(/\r?\n/);
-            let count = 0;
-            for (const raw of lines) {
-                const trimmed = raw.trim();
-                if (
-                    trimmed.startsWith('第') &&
-                    /第[一二三四五六七八九十百千万零〇\d]+[章节回]/.test(trimmed) &&
-                    trimmed.length < 40
-                ) {
-                    count++;
-                }
-            }
-            const result = count > 0 ? count : 1;
+            // 与阅读器共用同一套解析规则，避免导入值与实际章节数不一致
+            const result = countChapters(bytes);
             logger.info('[Import] TXT 章节数:', result);
             return result;
         }
@@ -156,32 +145,6 @@ async function detectTotalPages(
         return 0;
     }
 }
-
-/**
- * 轻量解码（用于章节计数）
- */
-function decodeTextForCount(bytes: Uint8Array): string {
-    if (bytes[0] === 0xff && bytes[1] === 0xfe) {
-        return new TextDecoder('utf-16le').decode(bytes).replace(/^\uFEFF/, '');
-    }
-    if (bytes[0] === 0xfe && bytes[1] === 0xff) {
-        return new TextDecoder('utf-16be').decode(bytes).replace(/^\uFEFF/, '');
-    }
-    if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
-        return new TextDecoder('utf-8').decode(bytes).replace(/^\uFEFF/, '');
-    }
-    try {
-        return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    } catch {
-        try {
-            return new TextDecoder('gbk').decode(bytes);
-        } catch {
-            return new TextDecoder('utf-8').decode(bytes);
-        }
-    }
-}
-
-
 
 async function handleImport() {
     try {
@@ -203,6 +166,24 @@ async function handleImport() {
         const imported = await api.importBookFile(selected);
         logger.info('[Import] 文件已复制:', imported);
 
+        if (imported.duplicate) {
+            const choice = await chooseAction(
+                `《${imported.title}》已在书架中，是否继续导入？`,
+                {
+                    title: '重复的书籍',
+                    first: '打开已有书籍',
+                    second: '仍然导入',
+                },
+            );
+            if (choice === 'first') {
+                if (imported.existing) {
+                    router.push(`/reader/book/${imported.existing.id}`);
+                }
+                return;
+            }
+            if (choice === 'cancel') return;
+        }
+
         // 自动识别页数/章节数
         const totalPages = await detectTotalPages(imported.filePath, imported.fileFormat);
         logger.info('[Import] 识别结果 totalPages =', totalPages);
@@ -212,6 +193,7 @@ async function handleImport() {
             author: '',
             filePath: imported.filePath,
             fileFormat: imported.fileFormat as 'epub' | 'pdf' | 'mobi' | 'txt',
+            hash: imported.hash,
             totalPages,
         });
     } catch (err) {

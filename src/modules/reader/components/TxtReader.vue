@@ -4,20 +4,35 @@ import { logger } from '../../../platform/services/logger'
 import { onMounted, onUnmounted, ref, computed, nextTick } from 'vue';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import * as api from '../api';
-import type { Book } from '../types';
+import type { Annotation, Book } from '../types';
+import { decodeText, parseChapters, type TxtChapter } from '../utils/txt';
+import AnnotationBubble from './AnnotationBubble.vue';
 
 const props = defineProps<{ book: Book }>();
 
-interface Chapter {
-    title: string;
-    content: string;
-    lineStart: number;
+type Chapter = TxtChapter;
+
+interface HighlightSegment {
+    text: string;
+    color?: string;
+    ids?: string[];
 }
 
 interface RenderedChapter {
     index: number;
     title: string;
     paragraphs: string[];
+    offsets: number[];
+    segments: HighlightSegment[][];
+}
+
+interface TxtAnnotation {
+    id: string;
+    color: string;
+    chapter: number;
+    start: number;
+    end: number;
+    text: string;
 }
 
 type PageMode = 'page' | 'scroll';
@@ -45,6 +60,20 @@ let scrollRaf = 0;
 const totalChapters = computed(() => chapters.value.length);
 const currentChapter = computed(() => chapters.value[currentIndex.value] ?? null);
 
+// 已加载的标注（仅包含带 chapter/start/end 的 TXT 标注）
+const annotations = ref<TxtAnnotation[]>([]);
+
+// 选中气泡
+const selectionBubble = ref({
+    visible: false,
+    x: 0,
+    y: 0,
+    text: '',
+    chapter: 0,
+    start: 0,
+    end: 0,
+});
+
 function readPageMode(): PageMode {
     try {
         return localStorage.getItem(PAGE_MODE_KEY) === 'scroll' ? 'scroll' : 'page';
@@ -60,102 +89,83 @@ function splitParagraphs(content: string): string[] {
         .filter((l) => l.length > 0);
 }
 
-const paragraphs = computed(() => splitParagraphs(currentChapter.value?.content ?? ''));
+/** 每个段落在章节纯文本中的起始偏移（段落之间以 \n 分隔） */
+function buildOffsets(paragraphs: string[]): number[] {
+    const offsets: number[] = [];
+    let acc = 0;
+    for (const p of paragraphs) {
+        offsets.push(acc);
+        acc += p.length + 1;
+    }
+    return offsets;
+}
+
+function chapterTextLength(paragraphs: string[], offsets: number[]): number {
+    if (paragraphs.length === 0) return 0;
+    const last = paragraphs.length - 1;
+    return offsets[last] + paragraphs[last].length;
+}
+
+/** 按标注位置把段落切成普通/高亮片段，重叠部分以先出现的标注为准 */
+function buildSegments(
+    paragraphs: string[],
+    offsets: number[],
+    chapterIndex: number,
+): HighlightSegment[][] {
+    const list = annotations.value
+        .filter((a) => a.chapter === chapterIndex)
+        .sort((a, b) => a.start - b.start);
+
+    return paragraphs.map((text, i) => {
+        if (list.length === 0) return [{ text }];
+        const po = offsets[i];
+        const pe = po + text.length;
+        const segs: HighlightSegment[] = [];
+        let cursor = po;
+        for (const ann of list) {
+            const s = Math.max(ann.start, po);
+            const e = Math.min(ann.end, pe);
+            if (e <= s) continue;
+            if (s > cursor) segs.push({ text: text.slice(cursor - po, s - po) });
+            const from = Math.max(s, cursor);
+            if (from < e) {
+                segs.push({ text: text.slice(from - po, e - po), color: ann.color, ids: [ann.id] });
+                cursor = e;
+            }
+        }
+        if (cursor < pe) segs.push({ text: text.slice(cursor - po) });
+        return segs.length > 0 ? segs : [{ text }];
+    });
+}
+
+function buildRenderedChapter(index: number): RenderedChapter | null {
+    const ch = chapters.value[index];
+    if (!ch) return null;
+    const paragraphs = splitParagraphs(ch.content);
+    const offsets = buildOffsets(paragraphs);
+    return {
+        index,
+        title: ch.title,
+        paragraphs,
+        offsets,
+        segments: buildSegments(paragraphs, offsets, index),
+    };
+}
+
+const currentRendered = computed<RenderedChapter | null>(() => {
+    if (!currentChapter.value) return null;
+    return buildRenderedChapter(currentIndex.value);
+});
 
 const renderedChapters = computed<RenderedChapter[]>(() => {
     const end = Math.min(scrollEnd.value, chapters.value.length - 1);
     const list: RenderedChapter[] = [];
     for (let i = scrollStart.value; i <= end; i++) {
-        const ch = chapters.value[i];
-        if (!ch) continue;
-        list.push({ index: i, title: ch.title, paragraphs: splitParagraphs(ch.content) });
+        const ch = buildRenderedChapter(i);
+        if (ch) list.push(ch);
     }
     return list;
 });
-
-/**
- * 按规则解析章节：
- * - 行首为"第"
- * - 上一行为空
- * - 该行长度合理（防止正文中带"第"的长句误判）
- */
-function parseChapters(text: string): Chapter[] {
-    const lines = text.split(/\r?\n/);
-    const result: Chapter[] = [];
-    let currentTitle = '序章';
-    let currentLines: string[] = [];
-    let currentStart = 0;
-
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const trimmed = line.trim();
-
-        // 更宽松的章节标题识别：
-        // 1. 以"第"开头
-        // 2. 中间有"章""节""回"之一
-        // 3. 长度不超过 40
-        // 4. 不是纯数字或标点
-        const isChapterStart =
-            trimmed.startsWith('第') &&
-            /第[一二三四五六七八九十百千万零〇\d]+[章节回]/.test(trimmed) &&
-            trimmed.length > 0 &&
-            trimmed.length < 40;
-
-        if (isChapterStart) {
-            const hasContent = currentLines.some((l) => l.trim().length > 0);
-            if (hasContent) {
-                result.push({
-                    title: currentTitle,
-                    content: currentLines.join('\n'),
-                    lineStart: currentStart,
-                });
-            }
-            currentTitle = trimmed;
-            currentLines = [];
-            currentStart = i;
-        } else {
-            currentLines.push(line);
-        }
-    }
-
-    const hasContent = currentLines.some((l) => l.trim().length > 0);
-    if (hasContent || result.length === 0) {
-        result.push({
-            title: currentTitle,
-            content: currentLines.join('\n'),
-            lineStart: currentStart,
-        });
-    }
-
-    return result;
-}
-
-function decodeText(bytes: Uint8Array): string {
-    // BOM 检测
-    if (bytes[0] === 0xff && bytes[1] === 0xfe) {
-        return new TextDecoder('utf-16le').decode(bytes).replace(/^\uFEFF/, '');
-    }
-    if (bytes[0] === 0xfe && bytes[1] === 0xff) {
-        return new TextDecoder('utf-16be').decode(bytes).replace(/^\uFEFF/, '');
-    }
-    if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
-        return new TextDecoder('utf-8').decode(bytes).replace(/^\uFEFF/, '');
-    }
-
-    // 尝试严格 UTF-8
-    try {
-        return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    } catch {
-        // 回退 GBK
-        try {
-            const text = new TextDecoder('gbk').decode(bytes);
-            logger.info('[TXT] 使用 GBK 解码');
-            return text;
-        } catch {
-            return new TextDecoder('utf-8').decode(bytes);
-        }
-    }
-}
 
 async function load() {
     const url = convertFileSrc(props.book.filePath);
@@ -181,6 +191,167 @@ async function load() {
             currentIndex.value = idx;
         }
     }
+}
+
+/** 加载已有标注，只保留带 chapter/start/end 的 TXT 标注 */
+async function loadAnnotations() {
+    try {
+        const list = await api.listAnnotations(props.book.id);
+        const parsed: TxtAnnotation[] = [];
+        for (const ann of list) {
+            try {
+                const pos = JSON.parse(ann.position || '{}');
+                if (
+                    typeof pos.chapter !== 'number' ||
+                    typeof pos.start !== 'number' ||
+                    typeof pos.end !== 'number'
+                ) {
+                    continue;
+                }
+                parsed.push({
+                    id: ann.id,
+                    color: ann.color,
+                    chapter: pos.chapter,
+                    start: pos.start,
+                    end: pos.end,
+                    text: ann.text,
+                });
+            } catch {
+                // 忽略解析失败的旧数据
+            }
+        }
+        annotations.value = parsed;
+    } catch (err) {
+        logger.warn('[TXT] 加载已有标注失败:', err);
+    }
+}
+
+/** 找到文本节点所在的段落 */
+function closestParagraph(node: Node | null): HTMLElement | null {
+    let el = node instanceof Element ? node : (node?.parentElement ?? null);
+    while (el && !el.matches('p[data-offset]')) el = el.parentElement;
+    return el as HTMLElement | null;
+}
+
+/** 计算选区端点相对段落开头的字符偏移 */
+function offsetWithin(el: HTMLElement, container: Node, offset: number): number {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    try {
+        range.setEnd(container, offset);
+    } catch {
+        return 0;
+    }
+    return range.toString().length;
+}
+
+/** 选中文字后弹出气泡，并把选区换算成章节内字符偏移 */
+function handleMouseUp() {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+
+    const area = contentEl.value;
+    if (!area) return;
+    const range = sel.getRangeAt(0);
+    if (!area.contains(range.startContainer) || !area.contains(range.endContainer)) return;
+
+    const startP = closestParagraph(range.startContainer);
+    if (!startP) return;
+    const startSection = startP.closest<HTMLElement>('[data-chapter-index]');
+    const chapterIndex = Number(startSection?.dataset.chapterIndex ?? currentIndex.value);
+    const ch = chapters.value[chapterIndex];
+    if (!ch) return;
+
+    const paragraphs = splitParagraphs(ch.content);
+    const offsets = buildOffsets(paragraphs);
+    const chapterLength = chapterTextLength(paragraphs, offsets);
+    const start = Number(startP.dataset.offset ?? 0) + offsetWithin(startP, range.startContainer, range.startOffset);
+
+    // 跨章节时把终点收敛到当前章节末尾
+    let end = chapterLength;
+    const endP = closestParagraph(range.endContainer);
+    const endSection = endP?.closest<HTMLElement>('[data-chapter-index]');
+    if (endP && endSection === startSection) {
+        end = Number(endP.dataset.offset ?? 0) + offsetWithin(endP, range.endContainer, range.endOffset);
+    }
+    if (end <= start) return;
+
+    const text = sel.toString().trim();
+    if (!text) return;
+
+    const rect = range.getBoundingClientRect();
+    selectionBubble.value = {
+        visible: true,
+        x: rect.left + rect.width / 2,
+        y: rect.top - 8,
+        text,
+        chapter: chapterIndex,
+        start,
+        end,
+    };
+}
+
+/** 保存标注（与 EPUB/PDF 共用同一张表） */
+async function saveAnnotation(color: string) {
+    const bubble = selectionBubble.value;
+    if (!bubble.text) return;
+
+    try {
+        const ann = await api.createAnnotation({
+            bookId: props.book.id,
+            text: bubble.text,
+            note: '',
+            page: bubble.chapter + 1,
+            position: JSON.stringify({
+                chapter: bubble.chapter,
+                start: bubble.start,
+                end: bubble.end,
+                text: bubble.text,
+            }),
+            color,
+        });
+
+        annotations.value = [
+            ...annotations.value,
+            {
+                id: ann.id,
+                color,
+                chapter: bubble.chapter,
+                start: bubble.start,
+                end: bubble.end,
+                text: bubble.text,
+            },
+        ];
+        window.dispatchEvent(new CustomEvent('mysystem:annotation-added', { detail: ann }));
+
+        selectionBubble.value.visible = false;
+        window.getSelection()?.removeAllRanges();
+        logger.info('[TXT] 标注已保存:', ann.id);
+    } catch (err) {
+        logger.error('[TXT] 保存标注失败:', err);
+    }
+}
+
+/** 跳转到标注位置（供父组件调用） */
+async function jumpToAnnotation(ann: Annotation) {
+    try {
+        const pos = JSON.parse(ann.position || '{}');
+        const chapter = Number(pos.chapter);
+        if (!Number.isFinite(chapter)) return;
+        await goToChapter(chapter);
+        await nextTick();
+        const target = contentEl.value?.querySelector<HTMLElement>(
+            `[data-ann-ids~="${ann.id}"]`,
+        );
+        target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } catch (err) {
+        logger.warn('[TXT] 标注跳转失败:', err);
+    }
+}
+
+/** 删除标注后移除高亮（供父组件调用） */
+function removeAnnotationHighlight(ann: Annotation) {
+    annotations.value = annotations.value.filter((a) => a.id !== ann.id);
 }
 
 function scrollToTop() {
@@ -418,9 +589,14 @@ async function saveProgress() {
     }
 }
 
+function closeBubble() {
+    selectionBubble.value.visible = false;
+}
+
 onMounted(async () => {
     try {
         await load();
+        await loadAnnotations();
         loading.value = false;
 
         if (pageMode.value === 'scroll') {
@@ -429,6 +605,7 @@ onMounted(async () => {
             scrollEnd.value = currentIndex.value;
             await fillViewport();
         }
+        window.addEventListener('mousedown', closeBubble);
     } catch (err) {
         logger.error('[TXT] 加载失败:', err);
         errorMsg.value = err instanceof Error ? err.message : String(err);
@@ -438,6 +615,7 @@ onMounted(async () => {
 
 onUnmounted(async () => {
     if (scrollRaf) cancelAnimationFrame(scrollRaf);
+    window.removeEventListener('mousedown', closeBubble);
     await saveProgress();
 });
 
@@ -452,6 +630,9 @@ defineExpose({
     pageMode,
     totalChapters,
     currentIndex,
+    currentChapter,
+    jumpToAnnotation,
+    removeAnnotationHighlight,
 });
 </script>
 
@@ -472,26 +653,34 @@ defineExpose({
         </aside>
 
         <!-- 正文 -->
-        <div ref="contentEl" class="txt-content-area" @scroll.passive="handleScroll">
+        <div ref="contentEl" class="txt-content-area" @scroll.passive="handleScroll" @mouseup="handleMouseUp">
             <div v-if="loading" class="overlay">加载中...</div>
             <div v-else-if="errorMsg" class="overlay error">{{ errorMsg }}</div>
 
             <!-- 翻页模式：一次显示一章 -->
-            <template v-else-if="pageMode === 'page' && currentChapter">
-                <h2 class="chapter-title">{{ currentChapter.title }}</h2>
-                <div class="chapter-body">
-                    <p v-for="(p, i) in paragraphs" :key="i">{{ p }}</p>
-                </div>
+            <template v-else-if="pageMode === 'page' && currentRendered">
+                <section :data-chapter-index="currentRendered.index">
+                    <h2 class="chapter-title">{{ currentRendered.title }}</h2>
+                    <div class="chapter-body">
+                        <p v-for="(segments, i) in currentRendered.segments" :key="i"
+                            :data-offset="currentRendered.offsets[i]">
+                            <span v-for="(seg, si) in segments" :key="si"
+                                :class="{ 'txt-highlight': seg.color }"
+                                :style="seg.color ? { background: seg.color + '4d' } : undefined"
+                                :data-ann-ids="seg.ids ? seg.ids.join(' ') : undefined">{{ seg.text }}</span>
+                        </p>
+                    </div>
 
-                <div class="chapter-end">
-                    <button v-if="currentIndex > 0" class="btn" @click="prevChapter">
-                        ← 上一章
-                    </button>
-                    <button v-if="currentIndex < totalChapters - 1" class="btn btn-primary" @click="nextChapter">
-                        下一章 →
-                    </button>
-                    <div v-else class="no-more">— 全文完 —</div>
-                </div>
+                    <div class="chapter-end">
+                        <button v-if="currentIndex > 0" class="btn" @click="prevChapter">
+                            ← 上一章
+                        </button>
+                        <button v-if="currentIndex < totalChapters - 1" class="btn btn-primary" @click="nextChapter">
+                            下一章 →
+                        </button>
+                        <div v-else class="no-more">— 全文完 —</div>
+                    </div>
+                </section>
             </template>
 
             <!-- 滚动模式：纵向连续加载 -->
@@ -500,7 +689,12 @@ defineExpose({
                     :data-chapter-index="ch.index">
                     <h2 class="chapter-title">{{ ch.title }}</h2>
                     <div class="chapter-body">
-                        <p v-for="(p, i) in ch.paragraphs" :key="i">{{ p }}</p>
+                        <p v-for="(segments, i) in ch.segments" :key="i" :data-offset="ch.offsets[i]">
+                            <span v-for="(seg, si) in segments" :key="si"
+                                :class="{ 'txt-highlight': seg.color }"
+                                :style="seg.color ? { background: seg.color + '4d' } : undefined"
+                                :data-ann-ids="seg.ids ? seg.ids.join(' ') : undefined">{{ seg.text }}</span>
+                        </p>
                     </div>
                 </section>
 
@@ -510,6 +704,10 @@ defineExpose({
                 </div>
             </template>
         </div>
+
+        <!-- 选中气泡 -->
+        <AnnotationBubble v-if="selectionBubble.visible" :x="selectionBubble.x" :y="selectionBubble.y"
+            @select="saveAnnotation" />
     </div>
 </template>
 
@@ -603,6 +801,11 @@ defineExpose({
     line-height: 1.9;
     text-indent: 2em;
     word-break: break-word;
+}
+
+.txt-highlight {
+    border-radius: 2px;
+    cursor: pointer;
 }
 
 .chapter-end {
